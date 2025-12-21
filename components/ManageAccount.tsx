@@ -1,0 +1,374 @@
+
+import React, { useState, useEffect } from 'react';
+import { 
+  X, 
+  ChevronDown, 
+  Building2, 
+  Bell, 
+  MapPin, 
+  Save,
+  Check,
+  User,
+  Zap,
+  RefreshCw,
+  Plus,
+  Trash2,
+  PlusCircle
+} from 'lucide-react';
+import { SERVICE_OPTIONS, TIMEZONES } from '../constants';
+import { DispatchStrategy, NotificationPreference, RestorationCompany } from '../types';
+import { syncCompanySettingsToSupabase } from '../lib/supabase.ts';
+
+interface ManageAccountProps {
+  isOpen: boolean;
+  onClose: () => void;
+  companySettings: RestorationCompany;
+  onSettingsUpdate: (settings: RestorationCompany) => void;
+}
+
+const formatPhoneNumber = (value: string) => {
+  if (!value) return value;
+  const phoneNumber = value.replace(/[^\d]/g, '').slice(0, 10);
+  const phoneNumberLength = phoneNumber.length;
+  if (phoneNumberLength < 4) return phoneNumber;
+  if (phoneNumberLength < 7) {
+    return `(${phoneNumber.slice(0, 3)}) ${phoneNumber.slice(3)}`;
+  }
+  return `(${phoneNumber.slice(0, 3)}) ${phoneNumber.slice(3, 6)}-${phoneNumber.slice(6, 10)}`;
+};
+
+const ManageAccount: React.FC<ManageAccountProps> = ({ isOpen, onClose, companySettings, onSettingsUpdate }) => {
+  const [expandedSection, setExpandedSection] = useState<string | null>('business');
+  const [settings, setSettings] = useState<RestorationCompany>(companySettings);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Sync internal state if props change (e.g. initial fetch completes)
+  useEffect(() => {
+    setSettings(companySettings);
+  }, [companySettings]);
+
+  if (!isOpen) return null;
+
+  const sections = [
+    { id: 'business', title: 'Business Settings', icon: <Building2 size={20} /> },
+    { id: 'dispatch', title: 'Dispatch Settings', icon: <Zap size={20} /> },
+    { id: 'owners', title: 'Owner Alerts', icon: <Bell size={20} /> },
+    { id: 'service', title: 'Service Area & Response Time', icon: <MapPin size={20} /> },
+  ];
+
+  const handleToggleService = (service: string) => {
+    if (!service) return;
+    setSettings(prev => ({
+      ...prev,
+      services: prev.services.includes(service)
+        ? prev.services.filter(s => s !== service)
+        : [...prev.services, service]
+    }));
+  };
+
+  const handleAddOwner = () => {
+    setSettings(prev => ({
+      ...prev,
+      owners: [...prev.owners, { name: '', phone: '', email: '' }]
+    }));
+  };
+
+  const handleRemoveOwner = (index: number) => {
+    if (settings.owners.length <= 1) return;
+    setSettings(prev => ({
+      ...prev,
+      owners: prev.owners.filter((_, i) => i !== index)
+    }));
+  };
+
+  const handleOwnerChange = (index: number, field: string, value: string) => {
+    const updatedOwners = [...settings.owners];
+    let finalValue = value;
+    if (field === 'phone') {
+      finalValue = formatPhoneNumber(value);
+    }
+    updatedOwners[index] = { ...updatedOwners[index], [field]: finalValue };
+    setSettings({ ...settings, owners: updatedOwners });
+  };
+
+  const handleSave = async () => {
+    try {
+      setIsSaving(true);
+      await syncCompanySettingsToSupabase(settings);
+      onSettingsUpdate(settings); // Update the parent state
+      alert('Settings successfully deployed to Sarah AI.');
+      onClose();
+    } catch (err: any) {
+      console.error('Save failed:', err);
+      alert(`Deployment failed: ${err.message}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-xl animate-in fade-in duration-300">
+      <div className="bg-white w-full max-w-2xl max-h-[92vh] rounded-[3rem] shadow-[0_32px_64px_-12px_rgba(0,0,0,0.3)] overflow-hidden flex flex-col border border-white/20">
+        
+        {/* Header */}
+        <div className="px-10 py-8 bg-white border-b border-slate-100 flex items-center justify-between">
+          <div className="flex items-center gap-5">
+            <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-blue-600/30">
+              <Building2 size={24} />
+            </div>
+            <h2 className="text-2xl font-black text-slate-900 tracking-tight">Manage Account</h2>
+          </div>
+          <button onClick={onClose} className="p-3 hover:bg-slate-100 rounded-full transition-all active:scale-90">
+            <X size={28} className="text-slate-400" />
+          </button>
+        </div>
+
+        {/* Accordions */}
+        <div className="flex-1 overflow-y-auto p-8 space-y-4 bg-slate-50/50 scrollbar-hide">
+          {sections.map((section) => (
+            <div key={section.id} className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden transition-all duration-500">
+              <button 
+                onClick={() => setExpandedSection(expandedSection === section.id ? null : section.id)}
+                className="w-full px-8 py-6 flex items-center justify-between hover:bg-slate-50/50 transition-colors"
+              >
+                <div className="flex items-center gap-4">
+                  <span className={`${expandedSection === section.id ? 'text-blue-600' : 'text-slate-400'}`}>
+                    {section.icon}
+                  </span>
+                  <span className="font-black text-slate-800 uppercase tracking-widest text-[11px]">{section.title}</span>
+                </div>
+                <ChevronDown 
+                  className={`text-slate-300 transition-transform duration-500 ${expandedSection === section.id ? 'rotate-180' : ''}`} 
+                  size={20} 
+                />
+              </button>
+
+              {expandedSection === section.id && (
+                <div className="px-10 pb-10 pt-2 border-t border-slate-50 animate-in slide-in-from-top-4 duration-500">
+                  
+                  {section.id === 'business' && (
+                    <div className="space-y-6">
+                      <div>
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 px-1">Company Name <span className="text-red-500">*</span></label>
+                        <input 
+                          type="text" 
+                          value={settings.name}
+                          onChange={(e) => setSettings({...settings, name: e.target.value})}
+                          className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-4 focus:ring-blue-600/5 focus:border-blue-600 outline-none text-slate-800 font-bold transition-all"
+                        />
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 px-1">Agent Name <span className="text-red-500">*</span></label>
+                          <input 
+                            type="text" 
+                            value={settings.agentName}
+                            onChange={(e) => setSettings({...settings, agentName: e.target.value})}
+                            className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-4 focus:ring-blue-600/5 focus:border-blue-600 outline-none text-slate-800 font-bold transition-all"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 px-1">Agent Phone Number</label>
+                          <p className="px-2 py-3 font-black text-blue-600 text-xl tracking-tighter">{settings.agentPhone1}</p>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 px-1">List Your Services <span className="text-red-500">*</span></label>
+                        <div className="flex flex-wrap gap-2 mb-4">
+                          {settings.services.map(s => (
+                            <span key={s} className="flex items-center gap-3 px-5 py-2.5 bg-slate-900 text-white text-[10px] font-black uppercase tracking-wider rounded-full shadow-lg">
+                              {s}
+                              <button onClick={() => handleToggleService(s)} className="hover:text-red-400 transition-colors"><X size={14} /></button>
+                            </span>
+                          ))}
+                        </div>
+                        <select 
+                          className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none text-slate-800 font-black text-sm cursor-pointer hover:bg-slate-100 transition-all shadow-inner"
+                          onChange={(e) => { handleToggleService(e.target.value); e.target.value = ""; }}
+                        >
+                          <option value="">Select services to add...</option>
+                          {SERVICE_OPTIONS.filter(o => !settings.services.includes(o)).map(o => (
+                            <option key={o} value={o}>{o}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  )}
+
+                  {section.id === 'dispatch' && (
+                    <div className="space-y-8">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 px-1">Dispatch Strategy <span className="text-red-500">*</span></label>
+                          <div className="space-y-3">
+                            {[DispatchStrategy.BROADCAST, DispatchStrategy.CASCADING].map((strat) => (
+                              <label key={strat} className={`flex items-center gap-4 p-5 rounded-[1.5rem] cursor-pointer border-2 transition-all ${settings.dispatchStrategy === strat ? 'border-blue-600 bg-blue-50/50 shadow-inner' : 'border-slate-100 bg-slate-50 hover:border-blue-200'}`}>
+                                <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${settings.dispatchStrategy === strat ? 'border-blue-600' : 'border-slate-300'}`}>
+                                  {settings.dispatchStrategy === strat && <div className="w-3 h-3 bg-blue-600 rounded-full"></div>}
+                                </div>
+                                <input type="radio" className="hidden" name="strategy" checked={settings.dispatchStrategy === strat} onChange={() => setSettings({...settings, dispatchStrategy: strat})} />
+                                <span className="text-sm font-black text-slate-900 uppercase tracking-tight">{strat}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 px-1">Timezone <span className="text-red-500">*</span></label>
+                          <select 
+                            value={settings.timezone}
+                            onChange={(e) => setSettings({...settings, timezone: e.target.value})}
+                            className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none text-slate-800 font-black text-sm"
+                          >
+                            {TIMEZONES.map(tz => <option key={tz} value={tz}>{tz}</option>)}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 px-1">Team Notification Preference <span className="text-red-500">*</span></label>
+                        <div className="space-y-3">
+                          {Object.values(NotificationPreference).map((pref) => (
+                            <label key={pref} className={`flex items-center gap-4 p-5 rounded-[1.5rem] cursor-pointer border transition-all ${settings.notificationPreference === pref ? 'border-blue-600 bg-blue-50/50' : 'border-slate-100 bg-slate-50 hover:bg-slate-100/50'}`}>
+                              <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${settings.notificationPreference === pref ? 'border-blue-600' : 'border-slate-300'}`}>
+                                {settings.notificationPreference === pref && <div className="w-3 h-3 bg-blue-600 rounded-full"></div>}
+                              </div>
+                              <input type="radio" className="hidden" name="notif" checked={settings.notificationPreference === pref} onChange={() => setSettings({...settings, notificationPreference: pref})} />
+                              <span className="text-[11px] font-black text-blue-700 uppercase tracking-tight">{pref}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 px-1">Max Lead Techs <span className="text-red-500">*</span></label>
+                          <input 
+                            type="number" 
+                            value={settings.maxLeadTechs} 
+                            onChange={(e) => setSettings({...settings, maxLeadTechs: parseInt(e.target.value) || 0})}
+                            className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none text-slate-800 font-black shadow-inner" 
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 px-1">Max Assistant Techs <span className="text-red-500">*</span></label>
+                          <input 
+                            type="number" 
+                            value={settings.maxAssistantTechs} 
+                            onChange={(e) => setSettings({...settings, maxAssistantTechs: parseInt(e.target.value) || 0})}
+                            className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none text-slate-800 font-black shadow-inner" 
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {section.id === 'owners' && (
+                    <div className="space-y-6">
+                      <div className="flex items-center justify-between px-1">
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Authorized Management Alerts</label>
+                        <button 
+                          onClick={handleAddOwner}
+                          className="flex items-center gap-2 text-blue-600 font-black uppercase text-[10px] tracking-widest hover:text-blue-700 transition-colors"
+                        >
+                          <PlusCircle size={16} /> Add Recipient
+                        </button>
+                      </div>
+                      
+                      <div className="space-y-4">
+                        {settings.owners.map((owner, idx) => (
+                          <div key={idx} className="p-8 bg-slate-50 rounded-[2.5rem] border border-slate-100 shadow-inner relative group/owner">
+                            <div className="flex items-center justify-between mb-8">
+                              <div className="flex items-center gap-4">
+                                <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center">
+                                  <User size={20} />
+                                </div>
+                                <span className="font-black text-slate-900 text-sm uppercase tracking-tight">Owner / Manager #{idx + 1}</span>
+                              </div>
+                              {settings.owners.length > 1 && (
+                                <button 
+                                  onClick={() => handleRemoveOwner(idx)}
+                                  className="p-2 text-slate-300 hover:text-red-500 transition-colors opacity-0 group-hover/owner:opacity-100"
+                                >
+                                  <Trash2 size={18} />
+                                </button>
+                              )}
+                            </div>
+                            <div className="space-y-5">
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                                 <input 
+                                   type="text" 
+                                   placeholder="Full Name" 
+                                   value={owner.name} 
+                                   onChange={(e) => handleOwnerChange(idx, 'name', e.target.value)}
+                                   className="w-full px-6 py-4 bg-white border border-slate-100 rounded-2xl outline-none text-slate-800 font-bold shadow-sm focus:ring-4 focus:ring-blue-600/5 transition-all" 
+                                 />
+                                 <input 
+                                   type="text" 
+                                   placeholder="Phone Number" 
+                                   value={owner.phone} 
+                                   onChange={(e) => handleOwnerChange(idx, 'phone', e.target.value)}
+                                   className="w-full px-6 py-4 bg-white border border-slate-100 rounded-2xl outline-none text-slate-800 font-bold shadow-sm focus:ring-4 focus:ring-blue-600/5 transition-all" 
+                                 />
+                              </div>
+                              <input 
+                                type="email" 
+                                placeholder="Email Address" 
+                                value={owner.email} 
+                                onChange={(e) => handleOwnerChange(idx, 'email', e.target.value)}
+                                className="w-full px-6 py-4 bg-white border border-slate-100 rounded-2xl outline-none text-slate-800 font-bold shadow-sm focus:ring-4 focus:ring-blue-600/5 transition-all" 
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {section.id === 'service' && (
+                    <div className="space-y-8">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        <div>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 px-1">Response Time (Mins)</label>
+                          <input type="number" value={settings.onsiteResponseMinutes} onChange={(e) => setSettings({...settings, onsiteResponseMinutes: parseInt(e.target.value) || 0})} className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none text-slate-800 font-black shadow-inner" />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 px-1">Center Zip Code</label>
+                          <input type="text" value={settings.centerZipCode} onChange={(e) => setSettings({...settings, centerZipCode: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none text-slate-800 font-black shadow-inner" />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 px-1">Service Mile Radius</label>
+                        <input type="number" value={settings.serviceMileRadius} onChange={(e) => setSettings({...settings, serviceMileRadius: parseInt(e.target.value) || 0})} className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none text-slate-800 font-black shadow-inner" />
+                      </div>
+                    </div>
+                  )}
+
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Footer */}
+        <div className="px-10 py-10 bg-white border-t border-slate-100 flex items-center justify-between">
+          <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.4em] opacity-60">* Required for Sarah AI</p>
+          <div className="flex gap-5">
+            <button onClick={onClose} className="px-8 py-4 text-slate-400 font-black uppercase tracking-widest text-[10px] hover:bg-slate-100 rounded-2xl transition-all active:scale-95">
+              Cancel
+            </button>
+            <button 
+              onClick={handleSave}
+              disabled={isSaving}
+              className="px-12 py-5 bg-blue-600 text-white font-black uppercase tracking-widest text-[11px] rounded-3xl shadow-[0_20px_40px_-10px_rgba(37,99,235,0.4)] hover:bg-blue-700 transition-all flex items-center gap-4 active:scale-95 disabled:opacity-50"
+            >
+              {isSaving ? <RefreshCw className="animate-spin" size={20} /> : <Save size={20} />}
+              {isSaving ? 'Deploying...' : 'Save Changes'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default ManageAccount;

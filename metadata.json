@@ -1,0 +1,8 @@
+{
+  "name": "Restoration AI Dispatch Portal",
+  "description": "A proprietary dispatch and management system for restoration companies, featuring AI voice agent controls, technician roster management, and call routing protocols.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
