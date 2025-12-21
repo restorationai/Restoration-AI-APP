@@ -166,6 +166,18 @@ export const MOCK_CALENDAR_EVENTS: CalendarEvent[] = [
     status: 'dispatched',
     location: '124 Oak Street, San Luis Obispo, CA',
     lossType: 'Burst Pipe'
+  },
+  {
+    id: 'evt2',
+    type: 'inspection',
+    title: 'Mold Inspection: Amanda Brooks',
+    startTime: formatDate(today, 14),
+    endTime: formatDate(today, 16),
+    contactId: 'con2',
+    assignedTechnicianIds: ['T1'],
+    status: 'confirmed',
+    location: '4502 Pismo Dr, Grover Beach, CA',
+    lossType: 'Basement Mold'
   }
 ];
 
