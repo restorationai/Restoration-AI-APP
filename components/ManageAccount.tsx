@@ -13,7 +13,14 @@ import {
   RefreshCw,
   Plus,
   Trash2,
-  PlusCircle
+  PlusCircle,
+  Clock,
+  ShieldCheck,
+  History,
+  Users,
+  BellRing,
+  AlertTriangle,
+  Globe
 } from 'lucide-react';
 import { SERVICE_OPTIONS, TIMEZONES } from '../constants';
 import { DispatchStrategy, NotificationPreference, RestorationCompany } from '../types';
@@ -42,7 +49,6 @@ const ManageAccount: React.FC<ManageAccountProps> = ({ isOpen, onClose, companyS
   const [settings, setSettings] = useState<RestorationCompany>(companySettings);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Sync internal state if props change (e.g. initial fetch completes)
   useEffect(() => {
     setSettings(companySettings);
   }, [companySettings]);
@@ -51,9 +57,9 @@ const ManageAccount: React.FC<ManageAccountProps> = ({ isOpen, onClose, companyS
 
   const sections = [
     { id: 'business', title: 'Business Settings', icon: <Building2 size={20} /> },
-    { id: 'dispatch', title: 'Dispatch Settings', icon: <Zap size={20} /> },
-    { id: 'owners', title: 'Owner Alerts', icon: <Bell size={20} /> },
-    { id: 'service', title: 'Service Area & Response Time', icon: <MapPin size={20} /> },
+    { id: 'dispatch', title: 'Dispatch & Scheduling Logic', icon: <Zap size={20} /> },
+    { id: 'owners', title: 'Management Notifications', icon: <Users size={20} /> },
+    { id: 'service', title: 'Service Area & Coverage', icon: <Globe size={20} /> },
   ];
 
   const handleToggleService = (service: string) => {
@@ -94,8 +100,9 @@ const ManageAccount: React.FC<ManageAccountProps> = ({ isOpen, onClose, companyS
   const handleSave = async () => {
     try {
       setIsSaving(true);
-      await syncCompanySettingsToSupabase(settings);
-      onSettingsUpdate(settings); // Update the parent state
+      const payload = { ...settings };
+      await syncCompanySettingsToSupabase(payload);
+      onSettingsUpdate(payload);
       alert('Settings successfully deployed to Sarah AI.');
       onClose();
     } catch (err: any) {
@@ -108,10 +115,9 @@ const ManageAccount: React.FC<ManageAccountProps> = ({ isOpen, onClose, companyS
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-xl animate-in fade-in duration-300">
-      <div className="bg-white w-full max-w-2xl max-h-[92vh] rounded-[3rem] shadow-[0_32px_64px_-12px_rgba(0,0,0,0.3)] overflow-hidden flex flex-col border border-white/20">
+      <div className="bg-white w-full max-w-2xl max-h-[92vh] rounded-[3rem] shadow-[0_32px_64px_-12px_rgba(0,0,0,0.3)] overflow-hidden flex flex-col border border-white/20 text-slate-900">
         
-        {/* Header */}
-        <div className="px-10 py-8 bg-white border-b border-slate-100 flex items-center justify-between">
+        <div className="px-10 py-8 bg-white border-b border-slate-100 flex items-center justify-between flex-shrink-0">
           <div className="flex items-center gap-5">
             <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center text-white shadow-xl shadow-blue-600/30">
               <Building2 size={24} />
@@ -123,7 +129,6 @@ const ManageAccount: React.FC<ManageAccountProps> = ({ isOpen, onClose, companyS
           </button>
         </div>
 
-        {/* Accordions */}
         <div className="flex-1 overflow-y-auto p-8 space-y-4 bg-slate-50/50 scrollbar-hide">
           {sections.map((section) => (
             <div key={section.id} className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden transition-all duration-500">
@@ -224,39 +229,70 @@ const ManageAccount: React.FC<ManageAccountProps> = ({ isOpen, onClose, companyS
                         </div>
                       </div>
 
-                      <div>
-                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 px-1">Team Notification Preference <span className="text-red-500">*</span></label>
-                        <div className="space-y-3">
-                          {Object.values(NotificationPreference).map((pref) => (
-                            <label key={pref} className={`flex items-center gap-4 p-5 rounded-[1.5rem] cursor-pointer border transition-all ${settings.notificationPreference === pref ? 'border-blue-600 bg-blue-50/50' : 'border-slate-100 bg-slate-50 hover:bg-slate-100/50'}`}>
-                              <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${settings.notificationPreference === pref ? 'border-blue-600' : 'border-slate-300'}`}>
-                                {settings.notificationPreference === pref && <div className="w-3 h-3 bg-blue-600 rounded-full"></div>}
-                              </div>
-                              <input type="radio" className="hidden" name="notif" checked={settings.notificationPreference === pref} onChange={() => setSettings({...settings, notificationPreference: pref})} />
-                              <span className="text-[11px] font-black text-blue-700 uppercase tracking-tight">{pref}</span>
-                            </label>
-                          ))}
-                        </div>
+                      {/* HIGH VISIBILITY EMERGENCY SECTION */}
+                      <div className="bg-red-50 p-8 rounded-[2.5rem] border border-red-200 space-y-4 shadow-sm">
+                         <div className="flex items-center gap-3">
+                           <AlertTriangle className="text-red-600" size={20} />
+                           <h4 className="text-[10px] font-black text-red-600 uppercase tracking-[0.3em]">CRITICAL: Emergency Response Protocol</h4>
+                         </div>
+                         <div className="bg-white p-6 rounded-2xl border border-red-100 flex items-center justify-between gap-6 shadow-inner">
+                            <div className="flex-1">
+                               <label className="block text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">On-Site Response Time (Minutes)</label>
+                               <p className="text-[10px] font-bold text-slate-400 italic leading-tight">This ETA will be quoted by Sarah AI to every emergency caller. Set this to your fastest reliable arrival time.</p>
+                            </div>
+                            <input 
+                               type="number" 
+                               value={settings.onsiteResponseMinutes} 
+                               onChange={(e) => setSettings({...settings, onsiteResponseMinutes: parseInt(e.target.value) || 0})} 
+                               className="w-32 px-5 py-4 bg-red-50/50 border border-red-100 rounded-2xl outline-none text-red-700 font-black text-center text-xl shadow-sm focus:ring-4 focus:ring-red-600/5 transition-all" 
+                            />
+                         </div>
+                      </div>
+
+                      <div className="bg-blue-600/5 p-8 rounded-[2.5rem] border border-blue-600/10 space-y-6">
+                         <div className="flex items-center gap-3 mb-2">
+                           <Clock className="text-blue-600" size={18} />
+                           <h4 className="text-[10px] font-black text-blue-600 uppercase tracking-[0.3em]">AI Scheduling Logic (Inspections)</h4>
+                         </div>
+                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                               <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Min Scheduling Notice (Hours)</label>
+                               <input 
+                                 type="number" 
+                                 value={settings.minimumSchedulingNotice} 
+                                 onChange={(e) => setSettings({...settings, minimumSchedulingNotice: parseInt(e.target.value) ?? 4})}
+                                 className="w-full px-5 py-3.5 bg-white border border-slate-200 rounded-2xl outline-none text-slate-800 font-black shadow-sm focus:ring-4 focus:ring-blue-600/5 transition-all" 
+                               />
+                            </div>
+                            <div>
+                               <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Appt Buffer Time (Mins)</label>
+                               <input 
+                                 type="number" 
+                                 value={settings.appointmentBufferTime} 
+                                 onChange={(e) => setSettings({...settings, appointmentBufferTime: parseInt(e.target.value) ?? 30})}
+                                 className="w-full px-5 py-3.5 bg-white border border-slate-200 rounded-2xl outline-none text-slate-800 font-black shadow-sm focus:ring-4 focus:ring-blue-600/5 transition-all" 
+                               />
+                            </div>
+                            <div className="col-span-2">
+                               <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Default Inspection Duration (Mins)</label>
+                               <input 
+                                 type="number" 
+                                 value={settings.defaultInspectionDuration} 
+                                 onChange={(e) => setSettings({...settings, defaultInspectionDuration: parseInt(e.target.value) ?? 120})}
+                                 className="w-full px-5 py-3.5 bg-white border border-slate-200 rounded-2xl outline-none text-slate-800 font-black shadow-sm focus:ring-4 focus:ring-blue-600/5 transition-all" 
+                               />
+                            </div>
+                         </div>
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div>
-                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 px-1">Max Lead Techs <span className="text-red-500">*</span></label>
-                          <input 
-                            type="number" 
-                            value={settings.maxLeadTechs} 
-                            onChange={(e) => setSettings({...settings, maxLeadTechs: parseInt(e.target.value) || 0})}
-                            className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none text-slate-800 font-black shadow-inner" 
-                          />
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 px-1">Max Lead Techs</label>
+                          <input type="number" value={settings.maxLeadTechs} onChange={(e) => setSettings({...settings, maxLeadTechs: parseInt(e.target.value) || 0})} className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none text-slate-800 font-black shadow-inner" />
                         </div>
                         <div>
-                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 px-1">Max Assistant Techs <span className="text-red-500">*</span></label>
-                          <input 
-                            type="number" 
-                            value={settings.maxAssistantTechs} 
-                            onChange={(e) => setSettings({...settings, maxAssistantTechs: parseInt(e.target.value) || 0})}
-                            className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none text-slate-800 font-black shadow-inner" 
-                          />
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 px-1">Max Assistant Techs</label>
+                          <input type="number" value={settings.maxAssistantTechs} onChange={(e) => setSettings({...settings, maxAssistantTechs: parseInt(e.target.value) || 0})} className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none text-slate-800 font-black shadow-inner" />
                         </div>
                       </div>
                     </div>
@@ -264,25 +300,28 @@ const ManageAccount: React.FC<ManageAccountProps> = ({ isOpen, onClose, companyS
 
                   {section.id === 'owners' && (
                     <div className="space-y-6">
-                      <div className="flex items-center justify-between px-1">
-                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Authorized Management Alerts</label>
-                        <button 
-                          onClick={handleAddOwner}
-                          className="flex items-center gap-2 text-blue-600 font-black uppercase text-[10px] tracking-widest hover:text-blue-700 transition-colors"
-                        >
-                          <PlusCircle size={16} /> Add Recipient
-                        </button>
+                      <div className="flex flex-col gap-2 mb-2 px-1">
+                        <div className="flex items-center justify-between">
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Management Alert Directory</label>
+                          <button 
+                            onClick={handleAddOwner}
+                            className="flex items-center gap-2 text-blue-600 font-black uppercase text-[10px] tracking-widest hover:text-blue-700 transition-colors"
+                          >
+                            <PlusCircle size={16} /> Add Recipient
+                          </button>
+                        </div>
+                        <p className="text-[10px] font-bold text-slate-400 italic leading-relaxed">The contacts below receive real-time SMS and Email alerts for new dispatches, job assignments, and Sarah AI activities.</p>
                       </div>
                       
                       <div className="space-y-4">
                         {settings.owners.map((owner, idx) => (
-                          <div key={idx} className="p-8 bg-slate-50 rounded-[2.5rem] border border-slate-100 shadow-inner relative group/owner">
+                          <div key={idx} className="p-8 bg-slate-50 rounded-[2.5rem] border border-slate-100 shadow-inner relative group/owner transition-all hover:bg-slate-100/50">
                             <div className="flex items-center justify-between mb-8">
                               <div className="flex items-center gap-4">
-                                <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center">
-                                  <User size={20} />
+                                <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center shadow-sm">
+                                  <BellRing size={20} />
                                 </div>
-                                <span className="font-black text-slate-900 text-sm uppercase tracking-tight">Owner / Manager #{idx + 1}</span>
+                                <span className="font-black text-slate-900 text-sm uppercase tracking-tight">Alert Recipient #{idx + 1}</span>
                               </div>
                               {settings.owners.length > 1 && (
                                 <button 
@@ -295,28 +334,37 @@ const ManageAccount: React.FC<ManageAccountProps> = ({ isOpen, onClose, companyS
                             </div>
                             <div className="space-y-5">
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                                 <input 
-                                   type="text" 
-                                   placeholder="Full Name" 
-                                   value={owner.name} 
-                                   onChange={(e) => handleOwnerChange(idx, 'name', e.target.value)}
-                                   className="w-full px-6 py-4 bg-white border border-slate-100 rounded-2xl outline-none text-slate-800 font-bold shadow-sm focus:ring-4 focus:ring-blue-600/5 transition-all" 
-                                 />
-                                 <input 
-                                   type="text" 
-                                   placeholder="Phone Number" 
-                                   value={owner.phone} 
-                                   onChange={(e) => handleOwnerChange(idx, 'phone', e.target.value)}
-                                   className="w-full px-6 py-4 bg-white border border-slate-100 rounded-2xl outline-none text-slate-800 font-bold shadow-sm focus:ring-4 focus:ring-blue-600/5 transition-all" 
-                                 />
+                                 <div>
+                                   <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Full Name / Title</label>
+                                   <input 
+                                     type="text" 
+                                     placeholder="e.g. John Smith (Owner)" 
+                                     value={owner.name} 
+                                     onChange={(e) => handleOwnerChange(idx, 'name', e.target.value)}
+                                     className="w-full px-6 py-4 bg-white border border-slate-100 rounded-2xl outline-none text-slate-800 font-bold shadow-sm focus:ring-4 focus:ring-blue-600/5 transition-all" 
+                                   />
+                                 </div>
+                                 <div>
+                                   <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Cell Phone (SMS)</label>
+                                   <input 
+                                     type="text" 
+                                     placeholder="(555) 555-5555" 
+                                     value={owner.phone} 
+                                     onChange={(e) => handleOwnerChange(idx, 'phone', e.target.value)}
+                                     className="w-full px-6 py-4 bg-white border border-slate-100 rounded-2xl outline-none text-slate-800 font-bold shadow-sm focus:ring-4 focus:ring-blue-600/5 transition-all" 
+                                   />
+                                 </div>
                               </div>
-                              <input 
-                                type="email" 
-                                placeholder="Email Address" 
-                                value={owner.email} 
-                                onChange={(e) => handleOwnerChange(idx, 'email', e.target.value)}
-                                className="w-full px-6 py-4 bg-white border border-slate-100 rounded-2xl outline-none text-slate-800 font-bold shadow-sm focus:ring-4 focus:ring-blue-600/5 transition-all" 
-                              />
+                              <div>
+                                <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Email for Activity Reports</label>
+                                <input 
+                                  type="email" 
+                                  placeholder="reports@company.com" 
+                                  value={owner.email} 
+                                  onChange={(e) => handleOwnerChange(idx, 'email', e.target.value)}
+                                  className="w-full px-6 py-4 bg-white border border-slate-100 rounded-2xl outline-none text-slate-800 font-bold shadow-sm focus:ring-4 focus:ring-blue-600/5 transition-all" 
+                                />
+                              </div>
                             </div>
                           </div>
                         ))}
@@ -328,17 +376,24 @@ const ManageAccount: React.FC<ManageAccountProps> = ({ isOpen, onClose, companyS
                     <div className="space-y-8">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                         <div>
-                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 px-1">Response Time (Mins)</label>
-                          <input type="number" value={settings.onsiteResponseMinutes} onChange={(e) => setSettings({...settings, onsiteResponseMinutes: parseInt(e.target.value) || 0})} className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none text-slate-800 font-black shadow-inner" />
-                        </div>
-                        <div>
                           <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 px-1">Center Zip Code</label>
                           <input type="text" value={settings.centerZipCode} onChange={(e) => setSettings({...settings, centerZipCode: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none text-slate-800 font-black shadow-inner" />
                         </div>
+                        <div>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 px-1">Service Mile Radius</label>
+                          <input type="number" value={settings.serviceMileRadius} onChange={(e) => setSettings({...settings, serviceMileRadius: parseInt(e.target.value) || 0})} className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none text-slate-800 font-black shadow-inner" />
+                        </div>
                       </div>
                       <div>
-                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 px-1">Service Mile Radius</label>
-                        <input type="number" value={settings.serviceMileRadius} onChange={(e) => setSettings({...settings, serviceMileRadius: parseInt(e.target.value) || 0})} className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none text-slate-800 font-black shadow-inner" />
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 px-1">Counties / Cities you service</label>
+                        <textarea 
+                          rows={4}
+                          value={settings.serviceAreas} 
+                          onChange={(e) => setSettings({...settings, serviceAreas: e.target.value})} 
+                          placeholder="e.g. San Luis Obispo, Atascadero, Paso Robles, Santa Maria..."
+                          className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-[2rem] outline-none text-slate-800 font-bold shadow-inner resize-none focus:ring-4 focus:ring-blue-600/5 focus:border-blue-600 transition-all" 
+                        />
+                        <p className="mt-2 text-[9px] font-bold text-slate-400 uppercase tracking-widest px-2">List cities or counties separated by commas.</p>
                       </div>
                     </div>
                   )}
@@ -349,9 +404,8 @@ const ManageAccount: React.FC<ManageAccountProps> = ({ isOpen, onClose, companyS
           ))}
         </div>
 
-        {/* Footer */}
-        <div className="px-10 py-10 bg-white border-t border-slate-100 flex items-center justify-between">
-          <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.4em] opacity-60">* Required for Sarah AI</p>
+        <div className="px-10 py-10 bg-white border-t border-slate-100 flex items-center justify-between flex-shrink-0">
+          <p className="text-[9px] font-black text-slate-400 uppercase tracking-[0.4em] opacity-60">* Secure Neural Sync Active</p>
           <div className="flex gap-5">
             <button onClick={onClose} className="px-8 py-4 text-slate-400 font-black uppercase tracking-widest text-[10px] hover:bg-slate-100 rounded-2xl transition-all active:scale-95">
               Cancel

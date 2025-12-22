@@ -39,6 +39,8 @@ export const MOCK_RESTORATION_COMPANIES: RestorationCompany[] = [
     agentPhone1: "+18054398428",
     onsiteResponseMinutes: 60,
     minimumSchedulingNotice: 4,
+    defaultInspectionDuration: 120,
+    appointmentBufferTime: 30,
     serviceAreas: "San Luis Obispo",
     centerZipCode: "93422",
     serviceMileRadius: 45,
@@ -66,19 +68,39 @@ export const MOCK_CONTACTS: Contact[] = [
     tags: ['Emergency', 'Water Damage'],
     pipelineStage: 'Dispatching',
     lastActivity: '2m ago',
-    customFields: { 'cf1': 'State Farm', 'cf2': 'SF-10293' }
+    customFields: { 'cf1': 'State Farm', 'cf2': 'SF-10293' },
+    vipStatus: false,
+    notes: 'Primary residence. Caller was very frantic.'
   },
   {
     id: 'con2',
     name: 'Amanda Brooks',
-    type: ContactType.HOMEOWNER,
+    type: ContactType.PROPERTY_MANAGER,
+    company: 'Brooks Realty Group',
     phone: '(760) 231-9981',
     email: 'abrooks@outlook.com',
     address: '4502 Pismo Dr, Grover Beach, CA',
-    tags: ['Follow-up', 'Mold'],
+    tags: ['VIP Partner', 'Repeat Client'],
     pipelineStage: 'Inbound',
     lastActivity: '15m ago',
-    customFields: { 'cf1': 'Allstate' }
+    customFields: { 'cf1': 'Allstate' },
+    vipStatus: true,
+    notes: 'Handles 150 units in SLO County.'
+  },
+  {
+    id: 'con3',
+    name: 'David Chen',
+    type: ContactType.ADJUSTER,
+    company: 'State Farm Claims',
+    phone: '(805) 123-4567',
+    email: 'd.chen@statefarm.com',
+    address: '892 Marsh St, San Luis Obispo, CA',
+    tags: ['Insurance'],
+    pipelineStage: 'Inbound',
+    lastActivity: '1h ago',
+    customFields: {},
+    vipStatus: false,
+    notes: 'Prefer email for documentation.'
   }
 ];
 

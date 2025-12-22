@@ -5,13 +5,13 @@ export enum Role {
 }
 
 export enum Status {
-  ACTIVE = '🟢 Active',
-  OFF_DUTY = '🔴 Off Duty'
+  ACTIVE = 'Active',
+  OFF_DUTY = 'Off Duty'
 }
 
 export enum InspectionStatus {
-  AVAILABLE = '✅ Available',
-  UNAVAILABLE = '⛔ Unavailable'
+  AVAILABLE = 'Available',
+  UNAVAILABLE = 'Unavailable'
 }
 
 export enum DispatchStrategy {
@@ -37,9 +37,14 @@ export enum ConversationSource {
 
 export enum ContactType {
   HOMEOWNER = 'Homeowner',
+  RENTER = 'Renter/Tenant',
   REFERRAL_PARTNER = 'Referral Partner',
+  PROPERTY_MANAGER = 'Property Manager',
+  INSURANCE_AGENT = 'Insurance Agent',
   ADJUSTER = 'Adjuster',
-  VENDOR = 'Vendor'
+  TPA = 'TPA',
+  VENDOR = 'Vendor',
+  OTHER = 'Other'
 }
 
 export type AppointmentType = 'emergency' | 'inspection';
@@ -79,6 +84,9 @@ export interface Contact {
   phone: string;
   email: string;
   address: string;
+  company?: string;
+  notes?: string;
+  vipStatus?: boolean;
   tags: string[];
   type: ContactType;
   pipelineStage: string;
@@ -139,6 +147,8 @@ export interface RestorationCompany {
   agentPhone1: string;
   onsiteResponseMinutes: number;
   minimumSchedulingNotice: number; // in hours
+  defaultInspectionDuration: number; // in minutes
+  appointmentBufferTime: number; // in minutes
   serviceAreas: string;
   centerZipCode: string;
   serviceMileRadius: number;

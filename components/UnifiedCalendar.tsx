@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Calendar as CalendarIcon, 
   ChevronLeft, 
@@ -23,25 +23,49 @@ import {
   Check,
   Tag,
   ChevronUp,
-  ChevronDown
+  ChevronDown,
+  Loader2,
+  AlertTriangle,
+  User,
+  Search,
+  UserPlus,
+  Mail,
+  Home,
+  CalendarRange,
+  Edit2
 } from 'lucide-react';
 import { MOCK_CALENDAR_EVENTS, MOCK_TECHNICIANS, MOCK_CONTACTS, INITIAL_COMPANY_SETTINGS } from '../constants';
-import { CalendarEvent, AppointmentType, Technician, Role, Status } from '../types';
+import { CalendarEvent, AppointmentType, Technician, Role, Status, InspectionStatus, Contact, ContactType } from '../types';
+import { fetchCalendarEvents, syncCalendarEventToSupabase, fetchTechniciansFromSupabase, fetchCompanySettings, syncContactToSupabase } from '../lib/supabase';
 
 type ViewType = 'day' | 'week' | 'month';
 type CalendarMode = 'emergency' | 'inspection' | 'all';
+
+const generateUUID = () => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
 
 const UnifiedCalendar: React.FC = () => {
   const [viewMode, setViewMode] = useState<CalendarMode>('all');
   const [viewType, setViewType] = useState<ViewType>('day');
   const [selectedDate, setSelectedDate] = useState(new Date());
-  const [events, setEvents] = useState<CalendarEvent[]>(MOCK_CALENDAR_EVENTS);
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [technicians, setTechnicians] = useState<Technician[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>(MOCK_CONTACTS);
+  const [companyConfig, setCompanyConfig] = useState(INITIAL_COMPANY_SETTINGS);
+  const [isLoading, setIsLoading] = useState(true);
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
   const [isBooking, setIsBooking] = useState(false);
+  const [isAddingContact, setIsAddingContact] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [now, setNow] = useState(new Date());
 
-  // Form State for Manual Booking
+  // Form States
   const [newJob, setNewJob] = useState({
+    id: null as string | null,
     title: '',
     type: 'inspection' as AppointmentType,
     contactId: '',
@@ -50,37 +74,82 @@ const UnifiedCalendar: React.FC = () => {
     zip: '',
     date: new Date(),
     time: `${new Date().getHours().toString().padStart(2, '0')}:${new Date().getMinutes().toString().padStart(2, '0')}`,
-    lossType: 'Mold Assessment',
+    lossType: '',
     customLossType: '',
     techIds: [] as string[]
   });
 
-  // Picker states
+  const [newContactForm, setNewContactForm] = useState({
+    name: '',
+    phone: '',
+    email: '',
+    address: '',
+    type: ContactType.HOMEOWNER
+  });
+
+  // UI States
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [isTimePickerOpen, setIsTimePickerOpen] = useState(false);
+  const [isContactPickerOpen, setIsContactPickerOpen] = useState(false);
+  const [contactSearch, setContactSearch] = useState('');
   const [pickerViewDate, setPickerViewDate] = useState(new Date());
 
   useEffect(() => {
+    const loadData = async () => {
+      try {
+        setIsLoading(true);
+        const [fetchedEvents, fetchedTechs, fetchedConfig] = await Promise.all([
+          fetchCalendarEvents(INITIAL_COMPANY_SETTINGS.id),
+          fetchTechniciansFromSupabase(INITIAL_COMPANY_SETTINGS.id),
+          fetchCompanySettings(INITIAL_COMPANY_SETTINGS.id)
+        ]);
+        
+        const finalEvents = fetchedEvents.length > 0 ? fetchedEvents : MOCK_CALENDAR_EVENTS;
+        setEvents(finalEvents);
+        setTechnicians(fetchedTechs.length > 0 ? fetchedTechs : MOCK_TECHNICIANS);
+        if (fetchedConfig) setCompanyConfig(fetchedConfig);
+      } catch (err) {
+        console.error("Failed to load calendar data:", err);
+        setEvents(MOCK_CALENDAR_EVENTS);
+        setTechnicians(MOCK_TECHNICIANS);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadData();
+
     const timer = setInterval(() => setNow(new Date()), 60000);
     return () => clearInterval(timer);
   }, []);
 
-  const hoursList = Array.from({ length: 15 }, (_, i) => i + 7); // 7 AM to 9 PM
+  const hoursList = Array.from({ length: 15 }, (_, i) => i + 7);
 
   const parseTimeValue = (timeStr: string, isEnd: boolean = false) => {
     if (!timeStr || timeStr === 'None') return null;
-    const [time, period] = timeStr.split(' ');
-    let [h, m] = time.split(':').map(Number);
-    if (period === 'PM' && h !== 12) h += 12;
-    if (period === 'AM' && h === 12) h = 0;
-    const val = h * 60 + (m || 0);
-    if (isEnd && val === 0) return 1440;
-    return val;
+    const parts = timeStr.split(' ');
+    if (parts.length === 2) {
+      let [h, m] = parts[0].split(':').map(Number);
+      const period = parts[1];
+      if (period === 'PM' && h !== 12) h += 12;
+      if (period === 'AM' && h === 12) h = 0;
+      const val = h * 60 + (m || 0);
+      if (isEnd && val === 0) return 1440;
+      return val;
+    } else {
+      let [h, m] = timeStr.split(':').map(Number);
+      const val = h * 60 + (m || 0);
+      if (isEnd && val === 0) return 1440;
+      return val;
+    }
   };
 
-  const isTechOnDuty = (tech: Technician, date: Date, hour: number) => {
-    const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
-    const mode = viewMode === 'inspection' ? 'inspection' : 'emergency';
+  const getDayName = (date: Date) => {
+    return date.toLocaleDateString('en-US', { weekday: 'short' }); 
+  };
+
+  const isTechOnDuty = (tech: Technician, date: Date, timeStr: string, overrideType?: AppointmentType) => {
+    const dayName = getDayName(date);
+    const mode = overrideType || (viewMode === 'inspection' ? 'inspection' : 'emergency');
     const schedule = mode === 'emergency' ? tech.emergencySchedule : tech.inspectionSchedule;
     const daySched = schedule.find(s => s.day === dayName);
 
@@ -89,26 +158,48 @@ const UnifiedCalendar: React.FC = () => {
     if (daySched.override === 'Force Off Duty') return false;
     if (daySched.is24Hours) return true;
 
-    const slotMinutes = hour * 60;
+    const totalMinutes = parseTimeValue(timeStr);
     const startMinutes = parseTimeValue(daySched.start);
     const endMinutes = parseTimeValue(daySched.end, true);
 
-    if (startMinutes === null || endMinutes === null) return false;
-    return slotMinutes >= startMinutes && slotMinutes < endMinutes;
+    if (totalMinutes === null || startMinutes === null || endMinutes === null) return false;
+    return totalMinutes >= startMinutes && totalMinutes < endMinutes;
+  };
+
+  const getTechConflict = (techId: string, bookingDate: Date, bookingTime: string, currentEventId: string | null = null) => {
+    const [h, m] = bookingTime.split(':').map(Number);
+    const start = new Date(bookingDate);
+    start.setHours(h, m, 0, 0);
+    
+    const duration = companyConfig.defaultInspectionDuration || 120;
+    const buffer = companyConfig.appointmentBufferTime || 30;
+    const end = new Date(start.getTime() + (duration + buffer) * 60000);
+
+    return events.find(event => {
+      if (event.id === currentEventId) return false;
+      if (!event.assignedTechnicianIds.includes(techId)) return false;
+      
+      const eventStart = new Date(event.startTime);
+      const eventEnd = new Date(new Date(event.endTime).getTime() + buffer * 60000);
+      
+      return (start < eventEnd) && (end > eventStart);
+    });
   };
 
   const isSlotInNoticeWindow = (date: Date, hour: number) => {
     if (viewMode === 'emergency') return false;
     const slotTime = new Date(date);
     slotTime.setHours(hour, 0, 0, 0);
-    const noticeLimit = new Date(now.getTime() + INITIAL_COMPANY_SETTINGS.minimumSchedulingNotice * 60 * 60 * 1000);
+    const noticeLimit = new Date(now.getTime() + (companyConfig.minimumSchedulingNotice || 4) * 60 * 60 * 1000);
     return slotTime < noticeLimit;
   };
 
   const getCapacityDetails = (date: Date, hour?: number) => {
-    const onDutyTechs = MOCK_TECHNICIANS.filter(t => {
-      if (hour !== undefined) return isTechOnDuty(t, date, hour);
-      const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
+    const timeStr = hour !== undefined ? `${hour.toString().padStart(2, '0')}:00` : "00:00";
+    
+    const onDutyTechs = technicians.filter(t => {
+      if (hour !== undefined) return isTechOnDuty(t, date, timeStr);
+      const dayName = getDayName(date);
       const mode = viewMode === 'inspection' ? 'inspection' : 'emergency';
       const sched = mode === 'emergency' ? t.emergencySchedule : t.inspectionSchedule;
       return sched.find(s => s.day === dayName)?.enabled;
@@ -116,7 +207,7 @@ const UnifiedCalendar: React.FC = () => {
 
     const assignedCount = events.filter(e => {
       const start = new Date(e.startTime);
-      const sameDay = start.getDate() === date.getDate() && start.getMonth() === date.getMonth();
+      const sameDay = start.toDateString() === date.toDateString();
       if (hour !== undefined) return sameDay && start.getHours() === hour;
       return sameDay;
     }).length;
@@ -129,6 +220,21 @@ const UnifiedCalendar: React.FC = () => {
       isLocked: hour !== undefined ? isSlotInNoticeWindow(date, hour) : false
     };
   };
+
+  const candidateSquad = useMemo(() => {
+    if (!technicians.length) return [];
+    
+    return technicians.filter(t => {
+      const onDuty = isTechOnDuty(t, newJob.date, newJob.time, newJob.type);
+      if (!onDuty) return false;
+
+      if (newJob.type === 'inspection') {
+        return t.role === Role.LEAD;
+      } else {
+        return t.role === Role.LEAD || t.role === Role.ASSISTANT;
+      }
+    });
+  }, [technicians, newJob.date, newJob.time, newJob.type]);
 
   const filteredEvents = useMemo(() => {
     if (viewMode === 'all') return events;
@@ -143,58 +249,121 @@ const UnifiedCalendar: React.FC = () => {
     setSelectedDate(next);
   };
 
-  const handleCreateJob = (e: React.FormEvent) => {
+  const handleCreateJob = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsSaving(true);
     
-    const d = new Date(newJob.date);
-    const [h, m] = newJob.time.split(':').map(Number);
-    d.setHours(h, m, 0, 0);
+    try {
+      const d = new Date(newJob.date);
+      const [h, m] = newJob.time.split(':').map(Number);
+      d.setHours(h, m, 0, 0);
 
-    if (isNaN(d.getTime())) {
-      alert("Please enter a valid date and time.");
-      return;
+      const duration = companyConfig.defaultInspectionDuration || 120;
+      const end = new Date(d.getTime() + duration * 60 * 1000);
+      const finalLossType = newJob.lossType === 'Other' ? (newJob.customLossType || 'Other') : newJob.lossType;
+      const fullLocation = `${newJob.location}${newJob.city ? `, ${newJob.city}` : ''}${newJob.zip ? ` ${newJob.zip}` : ''}`;
+      const contact = contacts.find(c => c.id === newJob.contactId);
+
+      const updatedEvent: CalendarEvent = {
+        id: newJob.id || generateUUID(),
+        type: newJob.type,
+        title: newJob.title || `${finalLossType || 'General'}: ${contact?.name || 'Manual Entry'}`,
+        startTime: d.toISOString(),
+        endTime: end.toISOString(),
+        contactId: newJob.contactId,
+        assignedTechnicianIds: newJob.techIds,
+        status: 'pending',
+        location: fullLocation || 'Unknown Location',
+        lossType: finalLossType
+      };
+
+      await syncCalendarEventToSupabase(updatedEvent, INITIAL_COMPANY_SETTINGS.id);
+      
+      if (newJob.id) {
+        setEvents(prev => prev.map(ev => ev.id === newJob.id ? updatedEvent : ev));
+      } else {
+        setEvents(prev => [...prev, updatedEvent]);
+      }
+      
+      setIsBooking(false);
+      
+      // Reset Form
+      setNewJob({
+        id: null,
+        title: '',
+        type: 'inspection',
+        contactId: '',
+        location: '',
+        city: '',
+        zip: '',
+        date: new Date(),
+        time: `${new Date().getHours().toString().padStart(2, '0')}:${new Date().getMinutes().toString().padStart(2, '0')}`,
+        lossType: '',
+        customLossType: '',
+        techIds: []
+      });
+      setSelectedDate(d);
+    } catch (err: any) {
+      console.error("Failed to save event:", err);
+      alert(`Error saving appointment: ${err.message || 'Database connection error'}`);
+    } finally {
+      setIsSaving(false);
     }
-
-    if (d < new Date()) {
-        alert("Cannot book an appointment in the past.");
-        return;
-    }
-
-    const end = new Date(d.getTime() + 2 * 60 * 60 * 1000);
-    const finalLossType = newJob.lossType === 'Other' ? (newJob.customLossType || 'Other') : newJob.lossType;
-    const fullLocation = `${newJob.location}${newJob.city ? `, ${newJob.city}` : ''}${newJob.zip ? ` ${newJob.zip}` : ''}`;
-
-    const newEvent: CalendarEvent = {
-      id: `evt-${Date.now()}`,
-      type: newJob.type,
-      title: newJob.title || `${finalLossType}: ${MOCK_CONTACTS.find(c => c.id === newJob.contactId)?.name || 'Walk-in'}`,
-      startTime: d.toISOString(),
-      endTime: end.toISOString(),
-      contactId: newJob.contactId,
-      assignedTechnicianIds: newJob.techIds,
-      status: 'pending',
-      location: fullLocation || 'Unknown Location',
-      lossType: finalLossType
-    };
-
-    setEvents(prev => [...prev, newEvent]);
-    setIsBooking(false);
-    setNewJob({
-      title: '',
-      type: 'inspection',
-      contactId: '',
-      location: '',
-      city: '',
-      zip: '',
-      date: new Date(),
-      time: `${new Date().getHours().toString().padStart(2, '0')}:${new Date().getMinutes().toString().padStart(2, '0')}`,
-      lossType: 'Mold Assessment',
-      customLossType: '',
-      techIds: []
-    });
   };
 
-  // Custom Picker Components
+  const handleEditEvent = (event: CalendarEvent) => {
+    const startDate = new Date(event.startTime);
+    const standardLossTypes = ['Mold Assessment', 'Water Damage Assessment', 'Fire Damage Assessment', 'Biohazard Assessment', 'Storm Damage Assessment'];
+    const isOther = event.lossType && !standardLossTypes.includes(event.lossType);
+
+    setNewJob({
+      id: event.id,
+      title: event.title,
+      type: event.type,
+      contactId: event.contactId,
+      location: event.location,
+      city: '',
+      zip: '',
+      date: startDate,
+      time: `${startDate.getHours().toString().padStart(2, '0')}:${startDate.getMinutes().toString().padStart(2, '0')}`,
+      lossType: isOther ? 'Other' : (event.lossType || ''),
+      customLossType: isOther ? (event.lossType || '') : '',
+      techIds: event.assignedTechnicianIds
+    });
+    
+    setIsBooking(true);
+    setSelectedEvent(null);
+  };
+
+  const handleCreateContact = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSaving(true);
+    try {
+      const newContact: Contact = {
+        id: generateUUID(),
+        name: newContactForm.name,
+        phone: newContactForm.phone,
+        email: newContactForm.email,
+        address: newContactForm.address,
+        tags: ['New Lead', 'Manual Entry'],
+        type: newContactForm.type,
+        pipelineStage: 'Inbound',
+        lastActivity: 'Just created',
+        customFields: {}
+      };
+
+      await syncContactToSupabase(newContact, INITIAL_COMPANY_SETTINGS.id);
+      setContacts(prev => [...prev, newContact]);
+      setNewJob(prev => ({ ...prev, contactId: newContact.id, location: newContact.address }));
+      setIsAddingContact(false);
+      setNewContactForm({ name: '', phone: '', email: '', address: '', type: ContactType.HOMEOWNER });
+    } catch (err: any) {
+      alert(`Failed to create contact: ${err.message}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const DatePickerPopover = () => {
     const year = pickerViewDate.getFullYear();
     const month = pickerViewDate.getMonth();
@@ -206,15 +375,12 @@ const UnifiedCalendar: React.FC = () => {
     todayStart.setHours(0, 0, 0, 0);
 
     const days = [];
-    // Previous month filler
     for (let i = firstDay - 1; i >= 0; i--) {
       days.push({ day: prevMonthDays - i, current: false, date: new Date(year, month - 1, prevMonthDays - i) });
     }
-    // Current month
     for (let i = 1; i <= daysInMonth; i++) {
       days.push({ day: i, current: true, date: new Date(year, month, i) });
     }
-    // Next month filler
     const remaining = 42 - days.length;
     for (let i = 1; i <= remaining; i++) {
       days.push({ day: i, current: false, date: new Date(year, month + 1, i) });
@@ -246,7 +412,7 @@ const UnifiedCalendar: React.FC = () => {
                 key={i}
                 type="button"
                 disabled={past}
-                onClick={() => setNewJob({ ...newJob, date: d.date })}
+                onClick={() => { setNewJob({ ...newJob, date: d.date }); setIsDatePickerOpen(false); }}
                 className={`h-10 w-10 flex items-center justify-center rounded-full text-xs font-bold transition-all ${
                   isSelected(d.date) 
                     ? 'bg-blue-600 text-white shadow-lg' 
@@ -262,11 +428,6 @@ const UnifiedCalendar: React.FC = () => {
             );
           })}
         </div>
-
-        <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
-          <button type="button" onClick={() => { setNewJob({ ...newJob, date: new Date() }); setIsDatePickerOpen(false); }} className="px-6 py-2.5 bg-slate-50 text-slate-800 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 transition-all">Now</button>
-          <button type="button" onClick={() => setIsDatePickerOpen(false)} className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-blue-600/20 hover:bg-blue-700 transition-all">Confirm</button>
-        </div>
       </div>
     );
   };
@@ -280,31 +441,13 @@ const UnifiedCalendar: React.FC = () => {
         let finalH = newH;
         if (newPeriod === 'PM' && finalH !== 12) finalH += 12;
         if (newPeriod === 'AM' && finalH === 12) finalH = 0;
-        
-        const d = new Date(newJob.date);
-        d.setHours(finalH, newM, 0, 0);
-        if (d < new Date()) {
-            const nowTime = new Date();
-            setNewJob({ ...newJob, time: `${nowTime.getHours().toString().padStart(2, '0')}:${nowTime.getMinutes().toString().padStart(2, '0')}` });
-        } else {
-            setNewJob({ ...newJob, time: `${finalH.toString().padStart(2, '0')}:${newM.toString().padStart(2, '0')}` });
-        }
-    };
-
-    const isTimeInPast = (newH: number, newM: number, newPeriod: 'AM' | 'PM') => {
-        let finalH = newH;
-        if (newPeriod === 'PM' && finalH !== 12) finalH += 12;
-        if (newPeriod === 'AM' && finalH === 12) finalH = 0;
-        const d = new Date(newJob.date);
-        d.setHours(finalH, newM, 0, 0);
-        return d < new Date();
+        setNewJob({ ...newJob, time: `${finalH.toString().padStart(2, '0')}:${newM.toString().padStart(2, '0')}` });
     };
 
     return (
         <div className="absolute top-full left-0 mt-2 w-[280px] bg-white rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-slate-100 z-[300] p-6 animate-in zoom-in-95 duration-200">
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">Set Execution Time</p>
-            
-            <div className="flex items-center justify-between mb-8">
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 text-center">Set Execution Time</p>
+            <div className="flex items-center justify-center gap-4 mb-8">
                 <div className="flex flex-col items-center gap-2">
                     <button type="button" onClick={() => updateTime(displayH === 12 ? 1 : displayH + 1, m, period)} className="p-1 text-slate-300 hover:text-blue-600"><ChevronUp size={20} /></button>
                     <span className="text-3xl font-black text-slate-800">{displayH}</span>
@@ -312,69 +455,129 @@ const UnifiedCalendar: React.FC = () => {
                 </div>
                 <span className="text-3xl font-black text-slate-200 mb-1">:</span>
                 <div className="flex flex-col items-center gap-2">
-                    <button type="button" onClick={() => updateTime(displayH, m === 59 ? 0 : m + 1, period)} className="p-1 text-slate-300 hover:text-blue-600"><ChevronUp size={20} /></button>
+                    <button type="button" onClick={() => updateTime(displayH, (m + 5) % 60, period)} className="p-1 text-slate-300 hover:text-blue-600"><ChevronUp size={20} /></button>
                     <span className="text-3xl font-black text-slate-800">{m.toString().padStart(2, '0')}</span>
-                    <button type="button" onClick={() => updateTime(displayH, m === 0 ? 59 : m - 1, period)} className="p-1 text-slate-300 hover:text-blue-600"><ChevronDown size={20} /></button>
+                    <button type="button" onClick={() => updateTime(displayH, (m - 5 + 60) % 60, period)} className="p-1 text-slate-300 hover:text-blue-600"><ChevronDown size={20} /></button>
                 </div>
-                <div className="flex flex-col gap-2">
-                    <button 
-                        type="button" 
-                        onClick={() => updateTime(displayH, m, 'AM')} 
-                        disabled={isTimeInPast(displayH, m, 'AM')}
-                        className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${period === 'AM' ? 'bg-blue-600 border-blue-600 text-white shadow-lg' : 'bg-slate-50 border-slate-100 text-slate-400'} disabled:opacity-30 disabled:cursor-not-allowed`}
-                    >AM</button>
-                    <button 
-                        type="button" 
-                        onClick={() => updateTime(displayH, m, 'PM')} 
-                        disabled={isTimeInPast(displayH, m, 'PM')}
-                        className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${period === 'PM' ? 'bg-blue-600 border-blue-600 text-white shadow-lg' : 'bg-slate-50 border-slate-100 text-slate-400'} disabled:opacity-30 disabled:cursor-not-allowed`}
-                    >PM</button>
+                <div className="flex flex-col gap-2 ml-2">
+                    <button type="button" onClick={() => updateTime(displayH, m, 'AM')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${period === 'AM' ? 'bg-blue-600 border-blue-600 text-white shadow-lg' : 'bg-slate-50 border-slate-100 text-slate-400'}`}>AM</button>
+                    <button type="button" onClick={() => updateTime(displayH, m, 'PM')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${period === 'PM' ? 'bg-blue-600 border-blue-600 text-white shadow-lg' : 'bg-slate-50 border-slate-100 text-slate-400'}`}>PM</button>
                 </div>
             </div>
-
-            <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
-                <button type="button" onClick={() => setIsTimePickerOpen(false)} className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-blue-600/20 hover:bg-blue-700 transition-all w-full">Confirm Time</button>
-            </div>
+            <button type="button" onClick={() => setIsTimePickerOpen(false)} className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-blue-600/20 hover:bg-blue-700 transition-all w-full">Confirm Time</button>
         </div>
     );
   };
 
-  const WeekView = () => {
-    const start = new Date(selectedDate);
-    start.setDate(selectedDate.getDate() - selectedDate.getDay());
-    const weekDays = Array.from({ length: 7 }, (_, i) => { const d = new Date(start); d.setDate(start.getDate() + i); return d; });
+  const ContactPickerPopover = () => {
+    const filtered = contacts.filter(c => 
+      c.name.toLowerCase().includes(contactSearch.toLowerCase()) ||
+      c.phone.includes(contactSearch)
+    );
 
     return (
-      <div className="flex flex-col h-full overflow-hidden">
-        <div className="grid grid-cols-[100px_repeat(7,1fr)] border-b border-slate-100 bg-slate-50/50">
-          <div className="border-r border-slate-100"></div>
-          {weekDays.map(date => (
-            <div key={date.toString()} className="p-4 text-center border-r border-slate-100">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{date.toLocaleDateString('en-US', { weekday: 'short' })}</p>
-              <p className={`text-lg font-black mt-1 ${new Date().toDateString() === date.toDateString() ? 'text-blue-600' : 'text-slate-800'}`}>{date.getDate()}</p>
+      <div className="absolute top-full left-0 mt-2 w-full bg-white rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-slate-100 z-[300] p-4 animate-in zoom-in-95 duration-200 overflow-hidden flex flex-col max-h-[400px]">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="relative flex-1">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input 
+              type="text" 
+              autoFocus
+              placeholder="Search CRM..." 
+              value={contactSearch}
+              onChange={(e) => setContactSearch(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-600/10"
+            />
+          </div>
+          <button 
+            type="button"
+            onClick={() => setIsAddingContact(true)}
+            className="p-2.5 bg-blue-600 text-white rounded-xl shadow-lg shadow-blue-600/20 hover:bg-blue-700 transition-all active:scale-95"
+            title="Create New Contact"
+          >
+            <UserPlus size={16} />
+          </button>
+        </div>
+        <div className="overflow-y-auto scrollbar-hide space-y-1">
+          {filtered.map(c => (
+            <button 
+              key={c.id}
+              type="button"
+              onClick={() => {
+                setNewJob({ ...newJob, contactId: c.id, location: c.address });
+                setIsContactPickerOpen(false);
+                setContactSearch('');
+              }}
+              className="w-full flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 transition-all text-left"
+            >
+              <div>
+                <p className="text-xs font-black text-slate-800">{c.name}</p>
+                <p className="text-[9px] font-bold text-slate-400">{c.phone}</p>
+              </div>
+              <span className="text-[8px] font-black text-blue-600 uppercase tracking-widest bg-blue-50 px-2 py-0.5 rounded">{c.type}</span>
+            </button>
+          ))}
+          {filtered.length === 0 && (
+             <div className="p-6 text-center text-slate-300 text-[10px] font-black uppercase">No contacts found</div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const WeekView = () => {
+    const startOfWeek = new Date(selectedDate);
+    startOfWeek.setDate(selectedDate.getDate() - selectedDate.getDay());
+    
+    const days = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(startOfWeek);
+      d.setDate(startOfWeek.getDate() + i);
+      return d;
+    });
+
+    return (
+      <div className="flex flex-col h-full">
+        <div className="grid grid-cols-[120px_repeat(7,1fr)] border-b border-slate-100 bg-slate-50/50 sticky top-0 z-10">
+          <div className="p-4 border-r border-slate-100 flex items-center justify-center"><Clock size={16} className="text-slate-400" /></div>
+          {days.map((day, i) => (
+            <div key={i} className={`p-4 text-center border-r border-slate-100 last:border-r-0 ${day.toDateString() === new Date().toDateString() ? 'bg-blue-50/50' : ''}`}>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{day.toLocaleDateString('en-US', { weekday: 'short' })}</p>
+              <p className={`text-sm font-black mt-1 ${day.toDateString() === new Date().toDateString() ? 'text-blue-600' : 'text-slate-800'}`}>{day.getDate()}</p>
             </div>
           ))}
         </div>
         <div className="flex-1 overflow-y-auto scrollbar-hide">
           {hoursList.map(hour => (
-            <div key={hour} className="grid grid-cols-[100px_repeat(7,1fr)] border-b border-slate-50 min-h-[80px]">
-              <div className="p-4 flex items-center justify-center border-r border-slate-50 text-[10px] font-black text-slate-400 uppercase">{hour > 12 ? `${hour - 12} PM` : `${hour} ${hour === 12 ? 'PM' : 'AM'}`}</div>
-              {weekDays.map(date => {
-                const hourEvents = filteredEvents.filter(e => { const d = new Date(e.startTime); return d.toDateString() === date.toDateString() && d.getHours() === hour; });
-                const cap = getCapacityDetails(date, hour);
+            <div key={hour} className="grid grid-cols-[120px_repeat(7,1fr)] border-b border-slate-50 min-h-[80px]">
+              <div className="border-r border-slate-50 p-4 flex items-center justify-center bg-slate-50/20">
+                <span className="text-[10px] font-black text-slate-400">
+                  {hour > 12 ? `${hour - 12} PM` : `${hour} ${hour === 12 ? 'PM' : 'AM'}`}
+                </span>
+              </div>
+              {days.map((day, i) => {
+                const hourEvents = filteredEvents.filter(e => {
+                  const d = new Date(e.startTime);
+                  return d.toDateString() === day.toDateString() && d.getHours() === hour;
+                });
+                const cap = getCapacityDetails(day, hour);
                 return (
-                  <div key={date.toString()} className={`border-r border-slate-50 p-2 relative group transition-colors ${cap.isLocked ? 'bg-slate-100/30' : 'hover:bg-slate-50/50'}`}>
-                    {cap.isLocked && <Lock size={10} className="absolute top-2 right-2 text-slate-300" />}
-                    {!cap.isLocked && (
-                      <div className="absolute right-2 top-2 flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                        {Array.from({ length: Math.min(cap.availableLeads, 2) }).map((_, i) => (
-                          <div key={i} className={`w-1.5 h-1.5 rounded-full ${viewMode === 'inspection' ? 'bg-emerald-400' : 'bg-blue-400'}`}></div>
-                        ))}
-                      </div>
-                    )}
-                    {hourEvents.map(e => (
-                      <button key={e.id} onClick={() => setSelectedEvent(e)} className={`w-full p-2 mb-1 rounded-xl border text-left text-[9px] font-bold shadow-sm ${e.type === 'emergency' ? 'bg-blue-50 border-blue-200 text-blue-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800'}`}>{(e.title || '').split(':')[0]}</button>
+                  <div key={i} className={`p-1 border-r border-slate-50 last:border-r-0 relative group ${cap.isLocked ? 'bg-slate-50/30' : 'hover:bg-slate-50/50 transition-colors'}`}>
+                    {hourEvents.map(event => (
+                      <button 
+                        key={event.id} 
+                        onClick={() => setSelectedEvent(event)}
+                        className={`w-full mb-1 p-2 rounded-xl border text-left text-[9px] font-black uppercase transition-all hover:scale-[1.02] shadow-sm ${
+                          event.type === 'emergency' ? 'bg-blue-600 text-white border-blue-500' : 'bg-emerald-600 text-white border-emerald-500'
+                        }`}
+                      >
+                        <p className="truncate">{event.title.split(':')[1] || event.title}</p>
+                      </button>
                     ))}
+                    {!cap.isLocked && hourEvents.length === 0 && (
+                       <button onClick={() => { setNewJob({...newJob, id: null, date: day, time: `${hour.toString().padStart(2, '0')}:00`, techIds: [], contactId: '', title: '', lossType: ''}); setIsBooking(true); }} className="absolute inset-0 opacity-0 group-hover:opacity-100 flex items-center justify-center">
+                          <Plus size={14} className="text-blue-600" />
+                       </button>
+                    )}
                   </div>
                 );
               })}
@@ -386,165 +589,75 @@ const UnifiedCalendar: React.FC = () => {
   };
 
   const MonthView = () => {
-    const daysInMonth = new Date(selectedDate.getFullYear(), selectedDate.getMonth() + 1, 0).getDate();
-    const firstDay = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1).getDay();
-    const days = Array.from({ length: 42 }, (_, i) => {
-      const dayNum = i - firstDay + 1;
-      if (dayNum > 0 && dayNum <= daysInMonth) return new Date(selectedDate.getFullYear(), selectedDate.getMonth(), dayNum);
-      return null;
-    });
+    const year = selectedDate.getFullYear();
+    const month = selectedDate.getMonth();
+    const firstDay = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const prevMonthDays = new Date(year, month, 0).getDate();
+
+    const days = [];
+    for (let i = firstDay - 1; i >= 0; i--) {
+      days.push({ day: prevMonthDays - i, current: false, date: new Date(year, month - 1, prevMonthDays - i) });
+    }
+    for (let i = 1; i <= daysInMonth; i++) {
+      days.push({ day: i, current: true, date: new Date(year, month, i) });
+    }
+    const remaining = 42 - days.length;
+    for (let i = 1; i <= remaining; i++) {
+      days.push({ day: i, current: false, date: new Date(year, month + 1, i) });
+    }
 
     return (
-      <div className="grid grid-cols-7 h-full border-l border-t border-slate-100">
-        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
-          <div key={d} className="p-4 border-r border-b border-slate-100 bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">{d}</div>
-        ))}
-        {days.map((date, i) => {
-          if (!date) return <div key={`empty-${i}`} className="bg-slate-50/30 border-r border-b border-slate-100"></div>;
-          const dayEvents = filteredEvents.filter(e => new Date(e.startTime).toDateString() === date.toDateString());
-          const cap = getCapacityDetails(date);
-          const isToday = new Date().toDateString() === date.toDateString();
-
-          return (
-            <div key={i} className={`p-3 border-r border-b border-slate-100 min-h-[120px] transition-colors hover:bg-slate-50/50 group cursor-pointer ${isToday ? 'bg-blue-50/20' : ''}`} onClick={() => { setSelectedDate(date); setViewType('day'); }}>
-              <div className="flex justify-between items-start mb-2">
-                <span className={`w-7 h-7 flex items-center justify-center rounded-lg text-xs font-black ${isToday ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>{date.getDate()}</span>
-                <div className="flex gap-0.5">
-                   {Array.from({ length: Math.min(cap.availableLeads, 3) }).map((_, i) => (
-                     <div key={i} className={`w-1.5 h-1.5 rounded-full ${viewMode === 'inspection' ? 'bg-emerald-400' : 'bg-blue-400'}`}></div>
-                   ))}
-                </div>
-              </div>
-              <div className="space-y-1">
-                {dayEvents.slice(0, 2).map(e => (
-                  <div key={e.id} className={`text-[9px] font-bold p-1 rounded truncate border ${e.type === 'emergency' ? 'bg-blue-50 border-blue-100 text-blue-700' : 'bg-emerald-50 border-emerald-100 text-emerald-700'}`}>{e.title}</div>
-                ))}
-                {dayEvents.length > 2 && <div className="text-[9px] font-black text-slate-300 uppercase pl-1">+{dayEvents.length - 2} more</div>}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    );
-  };
-
-  const EventDetailModal = () => {
-    if (!selectedEvent) return null;
-    const isEmergency = selectedEvent.type === 'emergency';
-    const startTime = new Date(selectedEvent.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const contact = MOCK_CONTACTS.find(c => c.id === selectedEvent.contactId);
-
-    return (
-      <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
-        <div className="bg-[#0f172a] w-full max-w-[500px] rounded-[2.5rem] shadow-2xl overflow-hidden border border-slate-800 text-white flex flex-col">
-          {/* Top Banner */}
-          <div className={`px-8 py-4 flex items-center justify-between ${isEmergency ? 'bg-blue-600/10 text-blue-400' : 'bg-emerald-600/10 text-emerald-400'}`}>
-            <div className="flex items-center gap-2">
-              <div className={`p-1 rounded-md ${isEmergency ? 'bg-blue-600' : 'bg-emerald-600'} text-white`}>
-                {isEmergency ? <ShieldCheck size={14} /> : <CheckCircle2 size={14} />}
-              </div>
-              <span className="text-[10px] font-black uppercase tracking-[0.2em]">
-                {isEmergency ? 'Emergency Assignment' : 'Inspection Assignment'}
-              </span>
-            </div>
-            <button onClick={() => setSelectedEvent(null)} className="text-slate-400 hover:text-white transition-colors">
-              <X size={20} />
-            </button>
-          </div>
-
-          <div className="p-8 space-y-10">
-            {/* Main Info */}
-            <div className="space-y-4">
-              <h2 className="text-3xl font-black tracking-tight leading-tight">{selectedEvent.title}</h2>
-              <div className="flex flex-col gap-3 text-slate-400">
-                <div className="flex items-center gap-2">
-                  <Clock size={16} />
-                  <span className="text-xs font-bold uppercase tracking-widest">{startTime} • {selectedEvent.status}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <MapPin size={16} />
-                  <span className="text-xs font-bold uppercase tracking-widest">{selectedEvent.location}</span>
-                </div>
-                {contact && (
-                  <div className="flex items-center gap-2">
-                    <Users size={16} />
-                    <span className="text-xs font-bold uppercase tracking-widest">Customer: {contact.name}</span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Squad Assembly */}
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Squad Assembly (Priority Sorted)</span>
-                <span className="text-[9px] font-black text-blue-500 uppercase tracking-widest">Priority By Rank</span>
-              </div>
-              <div className="space-y-3 max-h-[240px] overflow-y-auto scrollbar-hide pr-2">
-                {MOCK_TECHNICIANS.map((tech) => {
-                  const isAssigned = selectedEvent.assignedTechnicianIds.includes(tech.id);
-                  const isOffDuty = tech.emergencyStatus === Status.OFF_DUTY;
-                  const priority = isEmergency ? tech.emergencyPriority : tech.inspectionPriority;
-                  return (
-                    <div key={tech.id} className={`flex items-center gap-4 p-5 rounded-[1.8rem] border transition-all ${isAssigned ? 'bg-blue-600/10 border-blue-500/30' : 'bg-slate-800/20 border-slate-800/50 opacity-40'}`}>
-                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-xs shadow-lg ${isAssigned ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-400'}`}>
-                        {(tech.name || '??').split(' ').map(n => n[0]).join('')}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                           <p className="font-black text-sm truncate">{tech.name}</p>
-                           {isOffDuty && <span className="text-[8px] font-black text-red-400 uppercase tracking-widest bg-red-400/10 px-1.5 py-0.5 rounded">Off Duty</span>}
-                        </div>
-                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">
-                          {tech.role} • {priority}
-                        </p>
-                      </div>
-                      {isAssigned && (
-                        <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white shadow-lg">
-                          <Check size={16} />
-                        </div>
-                      )}
+      <div className="flex flex-col h-full overflow-hidden">
+        <div className="grid grid-cols-7 border-b border-slate-100 bg-slate-50/50">
+          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
+            <div key={d} className="p-4 text-center text-[10px] font-black text-slate-400 uppercase tracking-widest">{d}</div>
+          ))}
+        </div>
+        <div className="flex-1 grid grid-cols-7 grid-rows-6 overflow-y-auto scrollbar-hide">
+          {days.map((d, i) => {
+            const dayEvents = filteredEvents.filter(e => new Date(e.startTime).toDateString() === d.date.toDateString());
+            const isToday = d.date.toDateString() === new Date().toDateString();
+            const cap = getCapacityDetails(d.date);
+            
+            return (
+              <div key={i} className={`min-h-[120px] p-3 border-r border-b border-slate-50 last:border-r-0 flex flex-col gap-2 transition-colors ${d.current ? 'bg-white' : 'bg-slate-50/50'} ${isToday ? 'bg-blue-50/20' : ''}`}>
+                <div className="flex justify-between items-center">
+                  <span className={`text-xs font-black ${d.current ? (isToday ? 'text-blue-600 bg-blue-100 h-6 w-6 rounded-full flex items-center justify-center' : 'text-slate-800') : 'text-slate-300'}`}>{d.day}</span>
+                  {d.current && cap.availableLeads > 0 && (
+                    <div className="flex gap-0.5">
+                       {Array.from({ length: Math.min(cap.availableLeads, 3) }).map((_, i) => (
+                         <div key={i} className={`w-1 h-1 rounded-full ${viewMode === 'inspection' ? 'bg-emerald-400' : 'bg-blue-400'}`}></div>
+                       ))}
                     </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Context */}
-            <div className="bg-slate-800/30 rounded-[1.8rem] p-6 border border-slate-800/50 space-y-6">
-              <div className="flex items-center gap-2 text-blue-400">
-                <Info size={16} />
-                <span className="text-[10px] font-black uppercase tracking-[0.2em]">Incident Context</span>
-              </div>
-              <div className="grid grid-cols-2 gap-8">
-                <div>
-                  <label className="block text-[8px] font-black text-slate-500 uppercase tracking-widest mb-2">Loss Category</label>
-                  <p className="text-sm font-black">{selectedEvent.lossType || 'Unspecified'}</p>
+                  )}
                 </div>
-                <div>
-                  <label className="block text-[8px] font-black text-slate-500 uppercase tracking-widest mb-2">Dispatch Protocol</label>
-                  <p className="text-sm font-black">{INITIAL_COMPANY_SETTINGS.dispatchStrategy}</p>
+                <div className="flex flex-col gap-1 overflow-y-auto scrollbar-hide">
+                  {dayEvents.slice(0, 4).map(event => (
+                    <button 
+                      key={event.id} 
+                      onClick={() => setSelectedEvent(event)}
+                      className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase truncate text-left border ${
+                        event.type === 'emergency' ? 'bg-blue-600 text-white border-blue-500' : 'bg-emerald-600 text-white border-emerald-500'
+                      }`}
+                    >
+                      {event.title.split(':')[1] || event.title}
+                    </button>
+                  ))}
+                  {dayEvents.length > 4 && (
+                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest text-center mt-1">+{dayEvents.length - 4} More</p>
+                  )}
                 </div>
               </div>
-            </div>
-
-            {/* Actions */}
-            <div className="flex gap-4 pt-4">
-              <button onClick={() => setSelectedEvent(null)} className="flex-1 py-4 bg-white text-slate-900 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-slate-100 transition-all active:scale-95">
-                Reschedule
-              </button>
-              <button onClick={() => setSelectedEvent(null)} className="flex-[1.5] py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl shadow-blue-600/30 hover:bg-blue-700 transition-all active:scale-95">
-                Update Squad
-              </button>
-            </div>
-          </div>
+            );
+          })}
         </div>
       </div>
     );
   };
 
   return (
-    <div className="flex flex-col h-full bg-slate-50 overflow-hidden">
+    <div className="flex flex-col h-full bg-slate-50 overflow-hidden text-slate-900">
       <div className="bg-white border-b border-slate-200 px-8 py-6 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-3">
@@ -573,7 +686,7 @@ const UnifiedCalendar: React.FC = () => {
             </div>
             <button onClick={() => navigate('next')} className="p-2 hover:bg-slate-50 rounded-xl transition-colors text-slate-400 hover:text-slate-800"><ChevronRight size={20} /></button>
           </div>
-          <button onClick={() => setIsBooking(true)} className="flex items-center gap-2 px-6 py-3 bg-slate-900 text-white rounded-2xl text-[11px] font-black uppercase tracking-widest shadow-xl hover:bg-slate-800 transition-all active:scale-95"><Plus size={16} /> Book Job</button>
+          <button onClick={() => { setNewJob({id: null, title: '', type: 'inspection', contactId: '', location: '', city: '', zip: '', date: new Date(), time: `${new Date().getHours().toString().padStart(2, '0')}:00`, lossType: '', customLossType: '', techIds: []}); setIsBooking(true); }} className="flex items-center gap-2 px-6 py-3 bg-slate-900 text-white rounded-2xl text-[11px] font-black uppercase tracking-widest shadow-xl hover:bg-slate-800 transition-all active:scale-95"><Plus size={16} /> Book Job</button>
         </div>
       </div>
 
@@ -624,7 +737,7 @@ const UnifiedCalendar: React.FC = () => {
                         {cap.isLocked && (
                           <div className="flex-1 flex items-center justify-center">
                             <Lock size={16} className="text-slate-200 mr-2" />
-                            <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Booking Restricted (Notice Window)</span>
+                            <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Booking Restricted</span>
                           </div>
                         )}
                       </div>
@@ -639,7 +752,59 @@ const UnifiedCalendar: React.FC = () => {
         </div>
       </div>
 
-      <EventDetailModal />
+      {selectedEvent && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-[#0f172a] w-full max-w-[500px] rounded-[2.5rem] shadow-2xl overflow-hidden border border-slate-800 text-white flex flex-col">
+            <div className={`px-8 py-4 flex items-center justify-between ${selectedEvent.type === 'emergency' ? 'bg-blue-600/10 text-blue-400' : 'bg-emerald-600/10 text-emerald-400'}`}>
+              <div className="flex items-center gap-2">
+                <div className={`p-1 rounded-md ${selectedEvent.type === 'emergency' ? 'bg-blue-600' : 'bg-emerald-600'} text-white`}>
+                  {selectedEvent.type === 'emergency' ? <ShieldCheck size={14} /> : <CheckCircle2 size={14} />}
+                </div>
+                <span className="text-[10px] font-black uppercase tracking-[0.2em]">
+                  {selectedEvent.type === 'emergency' ? 'Emergency Assignment' : 'Inspection Assignment'}
+                </span>
+              </div>
+              <button onClick={() => setSelectedEvent(null)} className="text-slate-400 hover:text-white transition-colors"><X size={20} /></button>
+            </div>
+            <div className="p-8 space-y-10">
+              <div className="space-y-4">
+                <div className="flex justify-between items-start">
+                  <h2 className="text-3xl font-black tracking-tight leading-tight flex-1">{selectedEvent.title}</h2>
+                  <button 
+                    onClick={() => handleEditEvent(selectedEvent)}
+                    className="p-3 bg-white/5 border border-white/10 rounded-2xl hover:bg-white/10 transition-all text-slate-300"
+                    title="Edit Appointment"
+                  >
+                    <Edit2 size={18} />
+                  </button>
+                </div>
+                <div className="flex flex-col gap-3 text-slate-400">
+                  <div className="flex items-center gap-2"><Clock size={16} /><span className="text-xs font-bold uppercase tracking-widest">{new Date(selectedEvent.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • {selectedEvent.status}</span></div>
+                  <div className="flex items-center gap-2"><MapPin size={16} /><span className="text-xs font-bold uppercase tracking-widest">{selectedEvent.location}</span></div>
+                </div>
+              </div>
+              <div className="space-y-6">
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Squad Assembly</span>
+                <div className="space-y-3 max-h-[240px] overflow-y-auto scrollbar-hide">
+                  {technicians.filter(t => selectedEvent.assignedTechnicianIds.includes(t.id)).map((tech) => (
+                    <div key={tech.id} className="flex items-center gap-4 p-5 rounded-[1.8rem] border bg-blue-600/10 border-blue-500/30">
+                      <div className="w-12 h-12 rounded-2xl flex items-center justify-center font-black text-xs shadow-lg bg-blue-600 text-white">
+                        {tech.name?.split(' ').map(n => n[0]).join('')}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-black text-sm truncate">{tech.name}</p>
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{tech.role}</p>
+                      </div>
+                      <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white shadow-lg"><Check size={16} /></div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <button onClick={() => setSelectedEvent(null)} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl shadow-blue-600/30 hover:bg-blue-700 transition-all active:scale-95">Close Briefing</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isBooking && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300 overflow-y-auto">
@@ -647,52 +812,45 @@ const UnifiedCalendar: React.FC = () => {
             <div className="px-10 py-8 bg-slate-900 text-white flex justify-between items-center flex-shrink-0">
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg"><Briefcase size={24} /></div>
-                <h3 className="text-xl font-black uppercase tracking-tight">Manual Job Entry</h3>
+                <h3 className="text-xl font-black uppercase tracking-tight">{newJob.id ? 'Edit Appointment' : 'Manual Job Entry'}</h3>
               </div>
               <button onClick={() => setIsBooking(false)} className="p-3 hover:bg-white/10 rounded-full transition-colors"><X size={28} /></button>
             </div>
 
             <form onSubmit={handleCreateJob} className="p-10 space-y-8 overflow-y-auto scrollbar-hide max-h-[75vh]">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                
+                <div className="col-span-2 relative">
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Link CRM Contact <span className="text-red-500">*</span></label>
+                  <div 
+                    className={`relative flex items-center bg-slate-50 border rounded-2xl px-5 py-3.5 cursor-pointer transition-all hover:bg-white ${isContactPickerOpen ? 'border-blue-600 ring-4 ring-blue-600/5 shadow-inner' : 'border-slate-200'}`}
+                    onClick={() => { setIsContactPickerOpen(!isContactPickerOpen); setIsDatePickerOpen(false); setIsTimePickerOpen(false); }}
+                  >
+                    <User size={16} className={`mr-4 transition-colors ${isContactPickerOpen ? 'text-blue-600' : 'text-slate-400'}`} />
+                    <span className={`text-sm font-bold ${newJob.contactId ? 'text-slate-800' : 'text-slate-300'}`}>
+                      {newJob.contactId ? contacts.find(c => c.id === newJob.contactId)?.name : 'Select Client from CRM...'}
+                    </span>
+                  </div>
+                  {isContactPickerOpen && <ContactPickerPopover />}
+                </div>
+
                 <div className="col-span-2">
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Job Title / Description</label>
-                  <input 
-                    type="text" 
-                    required 
-                    placeholder="e.g. Miller Residence Assessment" 
-                    value={newJob.title}
-                    onChange={e => setNewJob({...newJob, title: e.target.value})}
-                    className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm transition-all"
-                  />
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Internal Job Title (Optional)</label>
+                  <input type="text" placeholder="e.g. Assessment and Extraction" value={newJob.title} onChange={e => setNewJob({...newJob, title: e.target.value})} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm transition-all" />
                 </div>
                 
                 <div>
                   <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Appointment Type</label>
                   <div className="flex gap-2 p-1 bg-slate-100 rounded-2xl border border-slate-200">
-                    <button 
-                      type="button"
-                      onClick={() => setNewJob({...newJob, type: 'inspection'})}
-                      className={`flex-1 py-3 rounded-xl text-[11px] font-black uppercase transition-all flex items-center justify-center gap-2 ${newJob.type === 'inspection' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-600 bg-transparent'}`}
-                    >
-                      <ShieldCheck size={16} /> Inspection
-                    </button>
-                    <button 
-                      type="button"
-                      onClick={() => setNewJob({...newJob, type: 'emergency'})}
-                      className={`flex-1 py-3 rounded-xl text-[11px] font-black uppercase transition-all flex items-center justify-center gap-2 ${newJob.type === 'emergency' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-600 bg-transparent'}`}
-                    >
-                      <AlertCircle size={16} /> Emergency
-                    </button>
+                    <button type="button" onClick={() => setNewJob({...newJob, type: 'inspection', techIds: []})} className={`flex-1 py-3 rounded-xl text-[11px] font-black uppercase transition-all flex items-center justify-center gap-2 ${newJob.type === 'inspection' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-600 bg-transparent'}`}><ShieldCheck size={16} /> Inspection</button>
+                    <button type="button" onClick={() => setNewJob({...newJob, type: 'emergency', techIds: []})} className={`flex-1 py-3 rounded-xl text-[11px] font-black uppercase transition-all flex items-center justify-center gap-2 ${newJob.type === 'emergency' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-600 bg-transparent'}`}><AlertCircle size={16} /> Emergency</button>
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Loss Category / Assessment Type</label>
-                  <select 
-                    value={newJob.lossType}
-                    onChange={e => setNewJob({...newJob, lossType: e.target.value})}
-                    className="w-full h-[52px] px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm cursor-pointer"
-                  >
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Loss Category</label>
+                  <select value={newJob.lossType} onChange={e => setNewJob({...newJob, lossType: e.target.value})} className="w-full h-[52px] px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm cursor-pointer">
+                    <option value="">Select Category...</option>
                     <option value="Mold Assessment">Mold Assessment</option>
                     <option value="Water Damage Assessment">Water Damage Assessment</option>
                     <option value="Fire Damage Assessment">Fire Damage Assessment</option>
@@ -701,30 +859,10 @@ const UnifiedCalendar: React.FC = () => {
                     <option value="Other">Other</option>
                   </select>
                 </div>
-                
-                {newJob.lossType === 'Other' && (
-                  <div className="col-span-2 animate-in slide-in-from-top-2 duration-300">
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Specify Custom Assessment</label>
-                    <div className="relative">
-                      <Tag size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                      <input 
-                        type="text" 
-                        required 
-                        placeholder="Type assessment type here..." 
-                        value={newJob.customLossType}
-                        onChange={e => setNewJob({...newJob, customLossType: e.target.value})}
-                        className="w-full pl-12 pr-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm"
-                      />
-                    </div>
-                  </div>
-                )}
 
                 <div className="relative">
                   <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Scheduled Date</label>
-                  <div 
-                    className={`relative flex items-center bg-slate-50 border rounded-2xl px-5 py-3.5 cursor-pointer transition-all hover:bg-white ${isDatePickerOpen ? 'border-blue-600 ring-4 ring-blue-600/5 shadow-inner' : 'border-slate-200'}`}
-                    onClick={() => { setIsDatePickerOpen(!isDatePickerOpen); setIsTimePickerOpen(false); }}
-                  >
+                  <div className={`relative flex items-center bg-slate-50 border rounded-2xl px-5 py-3.5 cursor-pointer transition-all hover:bg-white ${isDatePickerOpen ? 'border-blue-600 ring-4 ring-blue-600/5 shadow-inner' : 'border-slate-200'}`} onClick={() => { setIsDatePickerOpen(!isDatePickerOpen); setIsTimePickerOpen(false); setIsContactPickerOpen(false); }}>
                     <CalendarDays size={16} className={`mr-4 transition-colors ${isDatePickerOpen ? 'text-blue-600' : 'text-slate-400'}`} />
                     <span className={`text-sm font-bold ${isDatePickerOpen ? 'text-blue-600' : 'text-slate-800'}`}>{newJob.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                   </div>
@@ -733,19 +871,16 @@ const UnifiedCalendar: React.FC = () => {
 
                 <div className="relative">
                   <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Scheduled Time</label>
-                  <div 
-                    className={`relative flex items-center bg-slate-50 border rounded-2xl px-5 py-3.5 cursor-pointer transition-all hover:bg-white ${isTimePickerOpen ? 'border-blue-600 ring-4 ring-blue-600/5 shadow-inner' : 'border-slate-200'}`}
-                    onClick={() => { setIsTimePickerOpen(!isTimePickerOpen); setIsDatePickerOpen(false); }}
-                  >
+                  <div className={`relative flex items-center bg-slate-50 border rounded-2xl px-5 py-3.5 cursor-pointer transition-all hover:bg-white ${isTimePickerOpen ? 'border-blue-600 ring-4 ring-blue-600/5 shadow-inner' : 'border-slate-200'}`} onClick={() => { setIsTimePickerOpen(!isTimePickerOpen); setIsDatePickerOpen(false); setIsContactPickerOpen(false); }}>
                     <Clock size={16} className={`mr-4 transition-colors ${isTimePickerOpen ? 'text-blue-600' : 'text-slate-400'}`} />
                     <span className={`text-sm font-bold ${isTimePickerOpen ? 'text-blue-600' : 'text-slate-800'}`}>
-                        {(() => {
-                            const [h_str, m_str] = newJob.time.split(':');
-                            const h = parseInt(h_str);
-                            const m = parseInt(m_str);
-                            const p = h >= 12 ? 'PM' : 'AM';
-                            return `${h % 12 || 12}:${m.toString().padStart(2, '0')} ${p}`;
-                        })()}
+                      {(() => {
+                          const [h_str, m_str] = newJob.time.split(':');
+                          const h = parseInt(h_str);
+                          const m = parseInt(m_str);
+                          const p = h >= 12 ? 'PM' : 'AM';
+                          return `${h % 12 || 12}:${m.toString().padStart(2, '0')} ${p}`;
+                      })()}
                     </span>
                   </div>
                   {isTimePickerOpen && <TimePickerPopover />}
@@ -755,74 +890,157 @@ const UnifiedCalendar: React.FC = () => {
                   <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Service Address</label>
                   <div className="relative">
                     <MapPin size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input 
-                      type="text" 
-                      required
-                      placeholder="Street Address"
-                      value={newJob.location}
-                      onChange={e => setNewJob({...newJob, location: e.target.value})}
-                      className="w-full pl-12 pr-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm"
-                    />
+                    <input type="text" required placeholder="Street Address" value={newJob.location} onChange={e => setNewJob({...newJob, location: e.target.value})} className="w-full pl-12 pr-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm" />
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">City</label>
-                  <input 
-                    type="text" 
-                    placeholder="City"
-                    value={newJob.city}
-                    onChange={e => setNewJob({...newJob, city: e.target.value})}
-                    className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm transition-all"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Zip Code</label>
-                  <input 
-                    type="text" 
-                    placeholder="Zip Code"
-                    value={newJob.zip}
-                    onChange={e => setNewJob({...newJob, zip: e.target.value})}
-                    className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm transition-all"
-                  />
-                </div>
-
-                <div className="col-span-2">
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 px-1">Assign Dispatch Squad</label>
-                  <div className="grid grid-cols-2 gap-3">
-                    {MOCK_TECHNICIANS.map(tech => (
-                      <button 
-                        key={tech.id}
-                        type="button"
-                        onClick={() => {
-                          const ids = [...newJob.techIds];
-                          const idx = ids.indexOf(tech.id);
-                          if (idx > -1) ids.splice(idx, 1);
-                          else ids.push(tech.id);
-                          setNewJob({...newJob, techIds: ids});
-                        }}
-                        className={`flex items-center gap-3 p-4 rounded-2xl border transition-all text-left group/tech ${newJob.techIds.includes(tech.id) ? 'bg-blue-600 border-blue-600 text-white shadow-lg' : 'bg-white border-slate-200 text-slate-600 hover:border-blue-200'}`}
-                      >
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-[10px] shadow-sm transition-colors ${newJob.techIds.includes(tech.id) ? 'bg-white/20' : 'bg-slate-100 group-hover/tech:bg-blue-50'}`}>
-                           {(tech.name || '??').split(' ').map(n => n[0]).join('')}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-black truncate">{tech.name}</p>
-                          <p className={`text-[8px] font-black uppercase tracking-widest ${newJob.techIds.includes(tech.id) ? 'text-blue-100' : 'text-slate-400'}`}>{tech.role}</p>
-                        </div>
-                        {newJob.techIds.includes(tech.id) && <Check size={14} />}
-                      </button>
-                    ))}
+                <div className="col-span-2 space-y-4">
+                  <div className="flex items-center justify-between px-1">
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Assign Dispatch Squad</label>
+                    <span className="text-[9px] font-black text-blue-600 uppercase tracking-widest flex items-center gap-1">
+                      <Users size={12} /> {candidateSquad.length} Available On-Duty
+                    </span>
                   </div>
+                  
+                  {candidateSquad.length === 0 ? (
+                    <div className="p-10 bg-slate-50 border border-dashed border-slate-200 rounded-[2.5rem] flex flex-col items-center justify-center text-center">
+                       <AlertTriangle size={24} className="text-amber-400 mb-3" />
+                       <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest leading-relaxed">
+                         No technicians are currently on-duty <br/> for this specific slot.
+                       </p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-3 max-h-[250px] overflow-y-auto scrollbar-hide pr-1">
+                      {candidateSquad.map(tech => {
+                        const conflict = getTechConflict(tech.id, newJob.date, newJob.time, newJob.id);
+                        const isSelected = newJob.techIds.includes(tech.id);
+                        
+                        return (
+                          <button 
+                            key={tech.id}
+                            type="button"
+                            onClick={() => {
+                              const ids = [...newJob.techIds];
+                              const idx = ids.indexOf(tech.id);
+                              if (idx > -1) ids.splice(idx, 1);
+                              else ids.push(tech.id);
+                              setNewJob({...newJob, techIds: ids});
+                            }}
+                            className={`flex flex-col p-4 rounded-2xl border transition-all text-left relative overflow-hidden group/tech ${isSelected ? 'bg-blue-600 border-blue-600 text-white shadow-lg' : conflict ? 'bg-slate-50 border-slate-100 opacity-60 grayscale' : 'bg-white border-slate-200 text-slate-600 hover:border-blue-200'}`}
+                          >
+                            <div className="flex items-center gap-3 w-full">
+                              <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-[10px] shadow-sm transition-colors ${isSelected ? 'bg-white/20' : 'bg-slate-100 group-hover/tech:bg-blue-50'}`}>
+                                {tech.name?.split(' ').map(n => n[0]).join('')}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-black truncate">{tech.name}</p>
+                                <p className={`text-[8px] font-black uppercase tracking-widest ${isSelected ? 'text-blue-100' : 'text-slate-400'}`}>{tech.role}</p>
+                              </div>
+                              {isSelected && <Check size={14} />}
+                            </div>
+                            
+                            {conflict && !isSelected && (
+                              <div className="mt-2 flex items-center gap-1.5 text-[8px] font-black text-amber-600 uppercase tracking-widest bg-amber-50 px-2 py-0.5 rounded-md w-fit">
+                                <CalendarRange size={10} /> Conflict: {conflict.title.split(':')[0]}
+                              </div>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
               
               <div className="pt-4 flex gap-4 sticky bottom-0 bg-white/90 backdrop-blur-md pb-2">
                 <button type="button" onClick={() => setIsBooking(false)} className="flex-1 py-4 bg-slate-100 text-slate-500 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-slate-200 transition-all">Cancel</button>
-                <button type="submit" className="flex-[2] py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl shadow-blue-600/30 hover:bg-blue-700 transition-all active:scale-95">Complete Dispatch Entry</button>
+                <button 
+                  type="submit" 
+                  disabled={isSaving || !newJob.contactId}
+                  className="flex-[2] py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl shadow-blue-600/30 hover:bg-blue-700 transition-all active:scale-95 flex items-center justify-center gap-3 disabled:opacity-50"
+                >
+                  {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+                  {isSaving ? 'Syncing...' : (newJob.id ? 'Save Changes' : 'Complete Dispatch Entry')}
+                </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {isAddingContact && (
+        <div className="fixed inset-0 z-[210] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-white w-full max-w-lg rounded-[3rem] shadow-2xl overflow-hidden flex flex-col border border-white/20">
+             <div className="px-10 py-8 bg-slate-900 text-white flex justify-between items-center">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg"><UserPlus size={24} /></div>
+                  <h3 className="text-xl font-black uppercase tracking-tight">Add New CRM Contact</h3>
+                </div>
+                <button onClick={() => setIsAddingContact(false)} className="p-3 hover:bg-white/10 rounded-full transition-colors"><X size={28} /></button>
+             </div>
+             
+             <form onSubmit={handleCreateContact} className="p-10 space-y-6">
+                <div className="space-y-4">
+                   <div>
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Full Name</label>
+                      <input 
+                        type="text" 
+                        required
+                        value={newContactForm.name} 
+                        onChange={e => setNewContactForm({...newContactForm, name: e.target.value})} 
+                        className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm transition-all" 
+                        placeholder="John Doe" 
+                      />
+                   </div>
+                   <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Phone</label>
+                        <input 
+                          type="text" 
+                          required
+                          value={newContactForm.phone} 
+                          onChange={e => setNewContactForm({...newContactForm, phone: e.target.value})} 
+                          className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm transition-all" 
+                          placeholder="(555) 555-5555" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Email</label>
+                        <input 
+                          type="email" 
+                          required
+                          value={newContactForm.email} 
+                          onChange={e => setNewContactForm({...newContactForm, email: e.target.value})} 
+                          className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm transition-all" 
+                          placeholder="john@example.com" 
+                        />
+                      </div>
+                   </div>
+                   <div>
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Physical Address</label>
+                      <input 
+                        type="text" 
+                        required
+                        value={newContactForm.address} 
+                        onChange={e => setNewContactForm({...newContactForm, address: e.target.value})} 
+                        className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm transition-all" 
+                        placeholder="123 Main St, City, Zip" 
+                      />
+                   </div>
+                </div>
+                
+                <div className="pt-4 flex gap-4">
+                  <button type="button" onClick={() => setIsAddingContact(false)} className="flex-1 py-4 bg-slate-100 text-slate-500 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-slate-200 transition-all">Cancel</button>
+                  <button 
+                    type="submit" 
+                    disabled={isSaving}
+                    className="flex-[2] py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl shadow-blue-600/30 hover:bg-blue-700 transition-all active:scale-95 flex items-center justify-center gap-3 disabled:opacity-50"
+                  >
+                    {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+                    {isSaving ? 'Saving...' : 'Create & Link Contact'}
+                  </button>
+                </div>
+             </form>
           </div>
         </div>
       )}

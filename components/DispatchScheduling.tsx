@@ -202,6 +202,18 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
 
     const finalSchedule = localSchedule.map(s => ({ ...s, override: localOverride }));
     
+    // Calculate new status based on override
+    let newEmergencyStatus = editingTech.emergencyStatus;
+    let newInspectionStatus = editingTech.inspectionStatus;
+
+    if (isEmergency) {
+      if (localOverride === 'Force Active') newEmergencyStatus = Status.ACTIVE;
+      else if (localOverride === 'Force Off Duty') newEmergencyStatus = Status.OFF_DUTY;
+    } else {
+      if (localOverride === 'Force Active') newInspectionStatus = InspectionStatus.AVAILABLE;
+      else if (localOverride === 'Force Off Duty') newInspectionStatus = InspectionStatus.UNAVAILABLE;
+    }
+
     try {
       const finalR = rankMap.get(editingTech.id);
       const suffix = finalR === 1 ? 'st' : finalR === 2 ? 'nd' : finalR === 3 ? 'rd' : 'th';
@@ -215,7 +227,9 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
         inspection_priority: !isEmergency ? finalLabel : editingTech.inspectionPriority,
         emergency_priority_number: isEmergency ? finalR : editingTech.emergencyPriorityNumber,
         inspection_priority_number: !isEmergency ? finalR : editingTech.inspectionPriorityNumber,
-        phone: editingTech.phone
+        phone: editingTech.phone,
+        emergency_status: newEmergencyStatus,
+        inspection_status: newInspectionStatus
       });
 
       await syncScheduleToSupabase(editingTech.id, finalSchedule);
@@ -231,7 +245,9 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
             role: localRole,
             [isEmergency ? 'emergencySchedule' : 'inspectionSchedule']: finalSchedule,
             [isEmergency ? 'emergencyPriority' : 'inspectionPriority']: label,
-            [isEmergency ? 'emergencyPriorityNumber' : 'inspectionPriorityNumber']: newR
+            [isEmergency ? 'emergencyPriorityNumber' : 'inspectionPriorityNumber']: newR,
+            emergencyStatus: newEmergencyStatus,
+            inspectionStatus: newInspectionStatus
           };
         }
         
@@ -273,11 +289,11 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
         clientId: INITIAL_COMPANY_SETTINGS.id,
         emergencyPriority: newTechForm.addToEmergency ? "1st Priority" : "None",
         emergencyPriorityNumber: newTechForm.addToEmergency ? 1 : 99,
-        emergencyStatus: Status.OFF_DUTY,
+        emergencyStatus: Status.ACTIVE, // Default to Active for now
         emergencySchedule: [...DEFAULT_SCHEDULE],
         inspectionPriority: (newTechForm.addToInspection && newTechForm.role !== Role.ASSISTANT) ? "1st Priority" : "None",
         inspectionPriorityNumber: (newTechForm.addToInspection && newTechForm.role !== Role.ASSISTANT) ? 1 : 99,
-        inspectionStatus: InspectionStatus.UNAVAILABLE,
+        inspectionStatus: InspectionStatus.AVAILABLE, // Default to Available
         inspectionSchedule: [...DEFAULT_SCHEDULE],
     };
 
@@ -288,7 +304,9 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
             phone: newTech.phone,
             role: newTech.role,
             emergency_priority: newTech.emergencyPriority,
-            inspection_priority: newTech.inspectionPriority
+            inspection_priority: newTech.inspectionPriority,
+            emergency_status: newTech.emergencyStatus,
+            inspection_status: newTech.inspectionStatus
         });
         await syncScheduleToSupabase(newTech.id, DEFAULT_SCHEDULE);
         
