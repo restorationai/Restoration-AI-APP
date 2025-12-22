@@ -1,6 +1,6 @@
 
 import { createClient } from '@supabase/supabase-js';
-import { Status, InspectionStatus, Contact } from '../types.ts';
+import { Status, InspectionStatus, Contact, ContactType } from '../types.ts';
 
 const SUPABASE_URL = 'https://nyscciinkhlutvqkgyvq.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im55c2NjaWlua2hsdXR2cWtneXZxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYyODMxMzMsImV4cCI6MjA4MTg1OTEzM30.4c3QmNYFZS68y4JLtEKwzVo_nQm3pKzucLOajSVRDOA';
@@ -61,6 +61,7 @@ export const fetchCompanySettings = async (companyId: string) => {
     ];
   }
 
+  // Map database snake_case fields to interface camelCase fields
   return {
     id: data.id,
     name: data.name,
@@ -116,7 +117,7 @@ export const syncCompanySettingsToSupabase = async (companyData: any) => {
       service_areas: companyData.serviceAreas,
       minimum_scheduling_notice: companyData.minimumSchedulingNotice,
       default_inspection_duration: companyData.defaultInspectionDuration,
-      appointment_buffer_time: companyData.appointmentBufferTime
+      appointment_buffer_time: companyData.appointment_buffer_time
     }, { onConflict: 'id' })
     .select();
 
@@ -263,6 +264,30 @@ export const syncCalendarEventToSupabase = async (event: any, clientId: string) 
 
   if (error) throw new Error(error.message);
   return data;
+};
+
+export const fetchContactsFromSupabase = async (clientId: string) => {
+  const { data, error } = await supabase
+    .from('contacts')
+    .select('*')
+    .eq('client_id', clientId);
+
+  if (error) throw new Error(error.message);
+
+  return data.map((c: any) => ({
+    id: c.id,
+    name: c.name,
+    phone: c.phone,
+    email: c.email,
+    address: c.address,
+    tags: c.tags || [],
+    type: c.type as ContactType,
+    pipelineStage: c.pipeline_stage,
+    notes: c.notes,
+    company: c.company,
+    vipStatus: c.vip_status,
+    customFields: {}
+  }));
 };
 
 export const syncContactToSupabase = async (contact: Contact, clientId: string) => {
