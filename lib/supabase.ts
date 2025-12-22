@@ -1,6 +1,6 @@
 
 import { createClient } from '@supabase/supabase-js';
-import { Status, InspectionStatus, Contact, ContactType } from '../types.ts';
+import { Status, InspectionStatus, Contact, ContactType, Job, PipelineStage } from '../types.ts';
 
 const SUPABASE_URL = 'https://nyscciinkhlutvqkgyvq.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im55c2NjaWlua2hsdXR2cWtneXZxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYyODMxMzMsImV4cCI6MjA4MTg1OTEzM30.4c3QmNYFZS68y4JLtEKwzVo_nQm3pKzucLOajSVRDOA';
@@ -61,7 +61,6 @@ export const fetchCompanySettings = async (companyId: string) => {
     ];
   }
 
-  // Map database snake_case fields to interface camelCase fields
   return {
     id: data.id,
     name: data.name,
@@ -307,6 +306,58 @@ export const syncContactToSupabase = async (contact: Contact, clientId: string) 
       company: contact.company,
       vip_status: contact.vipStatus
     })
+    .select();
+
+  if (error) throw new Error(error.message);
+  return data;
+};
+
+/**
+ * JOB PIPELINE SYNC
+ */
+
+export const fetchJobsFromSupabase = async (clientId: string): Promise<Job[]> => {
+  const { data, error } = await supabase
+    .from('jobs')
+    .select('*')
+    .eq('client_id', clientId)
+    .order('created_at', { ascending: false });
+
+  if (error) throw new Error(error.message);
+
+  return data.map((j: any) => ({
+    id: j.id,
+    contactId: j.contact_id,
+    title: j.title,
+    stage: j.stage as PipelineStage,
+    lossType: j.loss_type || 'Other',
+    assignedTechIds: j.assigned_tech_ids || [],
+    urgency: j.urgency as any || 'Medium',
+    estimatedValue: Number(j.estimated_value) || 0,
+    timestamp: new Date(j.created_at).toLocaleDateString(),
+    customFields: j.custom_fields || {},
+    notes: [], // To be synced in next systematic step
+    readings: [], // To be synced in next systematic step
+    financials: [], // To be synced in next systematic step
+    documents: [] // To be synced in next systematic step
+  }));
+};
+
+export const syncJobToSupabase = async (job: Job, clientId: string) => {
+  const { data, error } = await supabase
+    .from('jobs')
+    .upsert({
+      id: job.id,
+      client_id: clientId,
+      contact_id: job.contactId,
+      title: job.title,
+      stage: job.stage,
+      loss_type: job.lossType,
+      urgency: job.urgency,
+      estimated_value: job.estimatedValue,
+      assigned_tech_ids: job.assignedTechIds,
+      custom_fields: job.customFields
+    }, { onConflict: 'id' })
     .select();
 
   if (error) throw new Error(error.message);

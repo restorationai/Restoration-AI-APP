@@ -2,7 +2,7 @@
 import { 
   Role, Status, InspectionStatus, DispatchStrategy, 
   NotificationPreference, RestorationCompany, Technician,
-  DispatchLog, DaySchedule, Contact, Conversation, ConversationSource, ContactType, TeamMember, CalendarEvent
+  DispatchLog, DaySchedule, Contact, Conversation, ConversationSource, ContactType, TeamMember, CalendarEvent, Job
 } from './types.ts';
 
 export const DEFAULT_SCHEDULE: DaySchedule[] = [
@@ -19,6 +19,40 @@ export const MOCK_TEAM: TeamMember[] = [
   { id: 'tm1', name: 'Santino Velci', email: 'contact@getrestorationai.com', role: 'Admin', isMe: true },
   { id: 'tm2', name: 'Levi Candiff', email: 'levi@ignitesystems.io', role: 'Technician' },
   { id: 'tm3', name: 'Melia Patterson', email: 'melia@ignitesystems.io', role: 'Support' }
+];
+
+// Fix: Add missing readings and financials properties to satisfy Job interface
+export const MOCK_JOBS: Job[] = [
+  {
+    id: 'job1',
+    contactId: 'con1',
+    title: 'Burst Pipe Emergency',
+    stage: 'Dispatching',
+    lossType: 'Water Damage',
+    assignedTechIds: ['T2'],
+    urgency: 'High',
+    estimatedValue: 2400,
+    timestamp: '2m ago',
+    notes: [],
+    documents: [],
+    readings: [],
+    financials: []
+  },
+  {
+    id: 'job2',
+    contactId: 'con2',
+    title: 'Mold Remediation Inspection',
+    stage: 'Inbound',
+    lossType: 'Mold',
+    assignedTechIds: [],
+    urgency: 'Medium',
+    estimatedValue: 1500,
+    timestamp: '15m ago',
+    notes: [],
+    documents: [],
+    readings: [],
+    financials: []
+  }
 ];
 
 export const MOCK_RESTORATION_COMPANIES: RestorationCompany[] = [

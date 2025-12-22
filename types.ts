@@ -1,4 +1,3 @@
-
 export enum Role {
   LEAD = 'Lead',
   ASSISTANT = 'Assistant'
@@ -49,12 +48,91 @@ export enum ContactType {
 
 export type AppointmentType = 'emergency' | 'inspection';
 
+export type PipelineStage = 'Inbound' | 'Dispatching' | 'In Progress' | 'Completion' | 'Invoiced';
+
+export interface GHLCustomFields {
+  incident_summary?: string;
+  work_authorized?: string;
+  urgency_level?: string;
+  areas_affected?: string;
+  source_of_damage?: string;
+  service_needed?: string;
+  property_type?: string;
+  relation_to_property?: string;
+  is_insurance_claim?: string;
+  insurance_provider?: string;
+  policy_number?: string;
+  claim_number?: string;
+  adjuster_name?: string;
+  adjuster_email?: string;
+  incident_id?: string;
+  new_lead_call_summary?: string;
+  owner_dm_name?: string;
+  owner_dm_phone?: string;
+  tenant_name?: string;
+  tenant_phone?: string;
+  call_outcome?: string;
+}
+
+export interface JobNote {
+  id: string;
+  author: string;
+  content: string;
+  timestamp: string;
+  isAiGenerated?: boolean;
+}
+
+export interface MoistureReading {
+  id: string;
+  date: string;
+  room: string;
+  temp: number;
+  rh: number;
+  gpp: number;
+  moistureContent?: number;
+  equipmentActive?: boolean;
+}
+
+export interface FinancialItem {
+  id: string;
+  description: string;
+  qty: number;
+  rate: number;
+  type: 'estimate' | 'invoice';
+}
+
+export interface JobDocument {
+  id: string;
+  name: string;
+  type: 'recording' | 'form' | 'photo' | 'invoice';
+  url: string;
+  timestamp: string;
+  isSigned?: boolean;
+}
+
+export interface Job {
+  id: string;
+  contactId: string;
+  title: string;
+  stage: PipelineStage;
+  lossType: string;
+  assignedTechIds: string[];
+  urgency: 'Low' | 'Medium' | 'High';
+  estimatedValue?: number;
+  timestamp: string;
+  customFields?: GHLCustomFields;
+  notes: JobNote[];
+  readings: MoistureReading[];
+  financials: FinancialItem[];
+  documents: JobDocument[];
+}
+
 export interface CalendarEvent {
   id: string;
   type: AppointmentType;
   title: string;
-  startTime: string; // ISO String
-  endTime: string;   // ISO String
+  startTime: string; 
+  endTime: string;   
   contactId: string;
   assignedTechnicianIds: string[];
   status: 'pending' | 'confirmed' | 'dispatched' | 'completed' | 'cancelled';
@@ -97,21 +175,17 @@ export interface Contact {
 export interface Message {
   id: string;
   sender: 'ai' | 'contact' | 'agent' | 'system';
-  senderId?: string; // ID of the TeamMember if sender is 'agent'
+  senderId?: string; 
   content: string;
   timestamp: string;
   source: ConversationSource | 'system';
-  subject?: string;
-  audioUrl?: string;
-  fromName?: string;
-  fromAddress?: string;
 }
 
 export interface Conversation {
   id: string;
-  contactId?: string; // Optional for internal chats
-  teamMemberIds?: string[]; // For internal chats
-  name?: string; // For group chats
+  contactId?: string; 
+  teamMemberIds?: string[]; 
+  name?: string; 
   lastMessage: string;
   timestamp: string;
   source: ConversationSource;
@@ -146,9 +220,9 @@ export interface RestorationCompany {
   agentName: string;
   agentPhone1: string;
   onsiteResponseMinutes: number;
-  minimumSchedulingNotice: number; // in hours
-  defaultInspectionDuration: number; // in minutes
-  appointmentBufferTime: number; // in minutes
+  minimumSchedulingNotice: number; 
+  defaultInspectionDuration: number; 
+  appointmentBufferTime: number; 
   serviceAreas: string;
   centerZipCode: string;
   serviceMileRadius: number;
@@ -166,12 +240,10 @@ export interface Technician {
   role: Role;
   phone: string;
   email: string;
-  // Emergency Logic
   emergencyPriority: string;
   emergencyPriorityNumber: number;
   emergencyStatus: Status;
   emergencySchedule: DaySchedule[];
-  // Inspection Logic
   inspectionPriority: string;
   inspectionPriorityNumber: number;
   inspectionStatus: InspectionStatus;

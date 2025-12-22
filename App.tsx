@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, 
@@ -25,6 +24,7 @@ import Inbox from './components/Inbox.tsx';
 import Contacts from './components/Contacts.tsx';
 import Placeholder from './components/Placeholder.tsx';
 import UnifiedCalendar from './components/UnifiedCalendar.tsx';
+import JobPipeline from './components/JobPipeline.tsx';
 import { INITIAL_COMPANY_SETTINGS } from './constants.tsx';
 import { fetchCompanySettings } from './lib/supabase.ts';
 import { RestorationCompany } from './types.ts';
@@ -69,14 +69,14 @@ const App: React.FC = () => {
     switch (activeTab) {
       case 'dispatch':
         return <DispatchScheduling onOpenSettings={() => setShowAccountModal(true)} />;
+      case 'job-pipeline':
+        return <JobPipeline />;
       case 'conversations':
         return <Inbox />;
       case 'contacts':
         return <Contacts />;
       case 'calendars':
         return <UnifiedCalendar />;
-      case 'job-pipeline':
-        return <Placeholder title="Job Pipeline" icon={<GitBranch className="w-12 h-12" />} />;
       case 'estimates-ai':
         return <Placeholder title="Estimates AI" icon={<FileText className="w-12 h-12" />} />;
       case 'settings':
