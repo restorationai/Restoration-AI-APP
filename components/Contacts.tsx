@@ -19,17 +19,13 @@ import {
   LayoutGrid,
   List as ListIcon,
   ShieldCheck,
-  ChevronRight,
   MoreHorizontal,
   Home,
-  User,
-  AlertCircle
+  User
 } from 'lucide-react';
-import { MOCK_CONTACTS, INITIAL_COMPANY_SETTINGS } from '../constants';
 import { Contact, ContactType } from '../types';
 import { syncContactToSupabase, fetchContactsFromSupabase } from '../lib/supabase';
 
-// Utility for formatting phone numbers in real-time
 const formatPhoneNumber = (value: string) => {
   if (!value) return value;
   const phoneNumber = value.replace(/[^\d]/g, '');
@@ -53,8 +49,8 @@ const Contacts: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isAddingContact, setIsAddingContact] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [companyId, setCompanyId] = useState<string | null>(null);
 
-  // Split address state for the form
   const [addrParts, setAddrParts] = useState({
     street: '',
     city: '',
@@ -73,17 +69,26 @@ const Contacts: React.FC = () => {
     tags: []
   });
 
-  // Initial Data Fetch
   useEffect(() => {
     const loadContacts = async () => {
       try {
         setIsLoading(true);
-        const fetched = await fetchContactsFromSupabase(INITIAL_COMPANY_SETTINGS.id);
-        // Fallback to MOCK_CONTACTS only if the database is literally empty
-        setContacts(fetched.length > 0 ? fetched : MOCK_CONTACTS);
+        const { data: { user } } = await (await import('../lib/supabase.ts')).supabase.auth.getUser();
+        if (user) {
+          const { data: profile } = await (await import('../lib/supabase.ts')).supabase
+            .from('profiles')
+            .select('company_id')
+            .eq('id', user.id)
+            .single();
+            
+          if (profile?.company_id) {
+            setCompanyId(profile.company_id);
+            const fetched = await fetchContactsFromSupabase(profile.company_id);
+            setContacts(fetched);
+          }
+        }
       } catch (err) {
         console.error("Failed to fetch contacts:", err);
-        setContacts(MOCK_CONTACTS);
       } finally {
         setIsLoading(false);
       }
@@ -115,13 +120,13 @@ const Contacts: React.FC = () => {
       total: contacts.length,
       vips: contacts.filter(c => c.vipStatus).length,
       counts,
-      // Aggregates for footer summary cards
       partnersTotal: contacts.filter(c => c.type === ContactType.REFERRAL_PARTNER || c.type === ContactType.PROPERTY_MANAGER).length,
       carriersTotal: contacts.filter(c => c.type === ContactType.INSURANCE_AGENT || c.type === ContactType.ADJUSTER || c.type === ContactType.TPA).length
     };
   }, [contacts]);
 
   const handleToggleVip = async (id: string, e: React.MouseEvent) => {
+    if (!companyId) return;
     e.stopPropagation();
     const contact = contacts.find(c => c.id === id);
     if (!contact) return;
@@ -130,7 +135,7 @@ const Contacts: React.FC = () => {
     setContacts(prev => prev.map(c => c.id === id ? updated : c));
     
     try {
-      await syncContactToSupabase(updated, INITIAL_COMPANY_SETTINGS.id);
+      await syncContactToSupabase(updated, companyId);
     } catch (err) {
       console.error("Failed to sync VIP status:", err);
     }
@@ -138,6 +143,7 @@ const Contacts: React.FC = () => {
 
   const handleSaveContact = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!companyId) return;
     setIsSaving(true);
     try {
       const fullAddress = `${addrParts.street}, ${addrParts.city}, ${addrParts.state} ${addrParts.zip}`;
@@ -159,7 +165,7 @@ const Contacts: React.FC = () => {
         customFields: contactForm.customFields || {}
       };
 
-      await syncContactToSupabase(finalContact, INITIAL_COMPANY_SETTINGS.id);
+      await syncContactToSupabase(finalContact, companyId);
       
       if (contactForm.id) {
         setContacts(prev => prev.map(c => c.id === newId ? finalContact : c));
@@ -317,64 +323,72 @@ const Contacts: React.FC = () => {
         </header>
 
         <div className="flex-1 overflow-y-auto p-10 scrollbar-hide">
-          {viewMode === 'grid' ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
-              {filteredContacts.map((contact) => (
-                <div key={contact.id} onClick={() => openEdit(contact)} className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm hover:shadow-2xl hover:shadow-slate-200/50 transition-all duration-300 group cursor-pointer relative overflow-hidden">
-                  {contact.vipStatus && <div className="absolute top-0 right-0 p-6"><Crown size={20} className="text-amber-500 fill-amber-500/20" /></div>}
-                  <div className="flex items-start gap-5 mb-8">
-                    <div className={`w-16 h-16 rounded-3xl flex items-center justify-center font-black text-xl shadow-inner border-2 transition-colors ${contact.vipStatus ? 'bg-amber-50 text-amber-600 border-amber-100' : 'bg-slate-50 text-slate-400 border-slate-100 group-hover:bg-blue-50 group-hover:text-blue-600 group-hover:border-blue-100'}`}>{contact.name.split(' ').map(n => n[0]).join('')}</div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-xl font-black text-slate-800 tracking-tight truncate group-hover:text-blue-600 transition-colors">{contact.name}</h3>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1 truncate">{contact.company || contact.type}</p>
+          {filteredContacts.length > 0 ? (
+            viewMode === 'grid' ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                {filteredContacts.map((contact) => (
+                  <div key={contact.id} onClick={() => openEdit(contact)} className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm hover:shadow-2xl hover:shadow-slate-200/50 transition-all duration-300 group cursor-pointer relative overflow-hidden">
+                    {contact.vipStatus && <div className="absolute top-0 right-0 p-6"><Crown size={20} className="text-amber-500 fill-amber-500/20" /></div>}
+                    <div className="flex items-start gap-5 mb-8">
+                      <div className={`w-16 h-16 rounded-3xl flex items-center justify-center font-black text-xl shadow-inner border-2 transition-colors ${contact.vipStatus ? 'bg-amber-50 text-amber-600 border-amber-100' : 'bg-slate-50 text-slate-400 border-slate-100 group-hover:bg-blue-50 group-hover:text-blue-600 group-hover:border-blue-100'}`}>{contact.name.split(' ').map(n => n[0]).join('')}</div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-xl font-black text-slate-800 tracking-tight truncate group-hover:text-blue-600 transition-colors">{contact.name}</h3>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1 truncate">{contact.company || contact.type}</p>
+                      </div>
+                    </div>
+                    <div className="space-y-4 mb-8">
+                      <div className="flex items-center gap-3 text-slate-500"><Smartphone size={16} className="text-slate-300" /><span className="text-xs font-bold">{contact.phone}</span></div>
+                      <div className="flex items-center gap-3 text-slate-500"><Mail size={16} className="text-slate-300" /><span className="text-xs font-bold truncate">{contact.email}</span></div>
+                      <div className="flex items-center gap-3 text-slate-500"><MapPin size={16} className="text-slate-300" /><span className="text-xs font-bold truncate">{contact.address.split(',')[0]}</span></div>
+                    </div>
+                    <div className="pt-6 border-t border-slate-50 flex items-center justify-between">
+                      <div className="flex gap-2"><span className={`px-2.5 py-1 rounded-lg text-[8px] font-black uppercase tracking-widest ${contact.vipStatus ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-500'}`}>{contact.type}</span></div>
+                      <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                         <button onClick={(e) => handleToggleVip(contact.id, e)} className={`p-2 rounded-xl transition-all ${contact.vipStatus ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500 hover:bg-amber-50'}`} title="Mark VIP"><Crown size={16} /></button>
+                         <button className="p-2 text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"><ExternalLink size={16} /></button>
+                      </div>
                     </div>
                   </div>
-                  <div className="space-y-4 mb-8">
-                    <div className="flex items-center gap-3 text-slate-500"><Smartphone size={16} className="text-slate-300" /><span className="text-xs font-bold">{contact.phone}</span></div>
-                    <div className="flex items-center gap-3 text-slate-500"><Mail size={16} className="text-slate-300" /><span className="text-xs font-bold truncate">{contact.email}</span></div>
-                    <div className="flex items-center gap-3 text-slate-500"><MapPin size={16} className="text-slate-300" /><span className="text-xs font-bold truncate">{contact.address.split(',')[0]}</span></div>
-                  </div>
-                  <div className="pt-6 border-t border-slate-50 flex items-center justify-between">
-                    <div className="flex gap-2"><span className={`px-2.5 py-1 rounded-lg text-[8px] font-black uppercase tracking-widest ${contact.vipStatus ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-500'}`}>{contact.type}</span></div>
-                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
-                       <button onClick={(e) => handleToggleVip(contact.id, e)} className={`p-2 rounded-xl transition-all ${contact.vipStatus ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500 hover:bg-amber-50'}`} title="Mark VIP"><Crown size={16} /></button>
-                       <button className="p-2 text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"><ExternalLink size={16} /></button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-500">
+                 <table className="w-full text-left">
+                    <thead className="bg-slate-50/50 border-b border-slate-100 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+                       <tr><th className="px-8 py-5">Full Name / Entity</th><th className="px-8 py-5">Contact Details</th><th className="px-8 py-5">Relationship</th><th className="px-8 py-5">Address</th><th className="px-8 py-5 text-right">Actions</th></tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                       {filteredContacts.map(contact => (
+                          <tr key={contact.id} onClick={() => openEdit(contact)} className="group hover:bg-slate-50/50 cursor-pointer transition-colors">
+                             <td className="px-8 py-5">
+                                <div className="flex items-center gap-4">
+                                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-[10px] shadow-sm border ${contact.vipStatus ? 'bg-amber-50 text-amber-600 border-amber-100' : 'bg-slate-100 text-slate-400 border-slate-200'}`}>{contact.name.split(' ').map(n => n[0]).join('')}</div>
+                                   <div><p className="text-sm font-black text-slate-800 group-hover:text-blue-600 transition-colors">{contact.name}</p><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{contact.company || 'Private Individual'}</p></div>
+                                </div>
+                             </td>
+                             <td className="px-8 py-5"><div className="space-y-1"><p className="text-xs font-bold text-slate-700 flex items-center gap-2"><Smartphone size={12} className="text-slate-300" /> {contact.phone}</p><p className="text-xs font-bold text-slate-500 flex items-center gap-2"><Mail size={12} className="text-slate-300" /> {contact.email}</p></div></td>
+                             <td className="px-8 py-5"><span className={`inline-flex px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${contact.vipStatus ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-500'}`}>{contact.type}</span></td>
+                             <td className="px-8 py-5"><p className="text-xs font-bold text-slate-500 truncate max-w-[200px]">{contact.address}</p></td>
+                             <td className="px-8 py-5 text-right">
+                                <div className="flex items-center justify-end gap-3 opacity-0 group-hover:opacity-100 transition-all">
+                                   <button onClick={(e) => handleToggleVip(contact.id, e)} className={`p-2 rounded-lg transition-all ${contact.vipStatus ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500 hover:bg-amber-50'}`}><Crown size={16} /></button>
+                                   <button className="p-2 text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded-lg"><MoreHorizontal size={18} /></button>
+                                </div>
+                             </td>
+                          </tr>
+                       ))}
+                    </tbody>
+                 </table>
+              </div>
+            )
           ) : (
-            <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-500">
-               <table className="w-full text-left">
-                  <thead className="bg-slate-50/50 border-b border-slate-100 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
-                     <tr><th className="px-8 py-5">Full Name / Entity</th><th className="px-8 py-5">Contact Details</th><th className="px-8 py-5">Relationship</th><th className="px-8 py-5">Address</th><th className="px-8 py-5 text-right">Actions</th></tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                     {filteredContacts.map(contact => (
-                        <tr key={contact.id} onClick={() => openEdit(contact)} className="group hover:bg-slate-50/50 cursor-pointer transition-colors">
-                           <td className="px-8 py-5">
-                              <div className="flex items-center gap-4">
-                                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-[10px] shadow-sm border ${contact.vipStatus ? 'bg-amber-50 text-amber-600 border-amber-100' : 'bg-slate-100 text-slate-400 border-slate-200'}`}>{contact.name.split(' ').map(n => n[0]).join('')}</div>
-                                 <div><p className="text-sm font-black text-slate-800 group-hover:text-blue-600 transition-colors">{contact.name}</p><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{contact.company || 'Private Individual'}</p></div>
-                              </div>
-                           </td>
-                           <td className="px-8 py-5"><div className="space-y-1"><p className="text-xs font-bold text-slate-700 flex items-center gap-2"><Smartphone size={12} className="text-slate-300" /> {contact.phone}</p><p className="text-xs font-bold text-slate-500 flex items-center gap-2"><Mail size={12} className="text-slate-300" /> {contact.email}</p></div></td>
-                           <td className="px-8 py-5"><span className={`inline-flex px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${contact.vipStatus ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-500'}`}>{contact.type}</span></td>
-                           <td className="px-8 py-5"><p className="text-xs font-bold text-slate-500 truncate max-w-[200px]">{contact.address}</p></td>
-                           <td className="px-8 py-5 text-right">
-                              <div className="flex items-center justify-end gap-3 opacity-0 group-hover:opacity-100 transition-all">
-                                 <button onClick={(e) => handleToggleVip(contact.id, e)} className={`p-2 rounded-lg transition-all ${contact.vipStatus ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500 hover:bg-amber-50'}`}><Crown size={16} /></button>
-                                 <button className="p-2 text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded-lg"><MoreHorizontal size={18} /></button>
-                              </div>
-                           </td>
-                        </tr>
-                     ))}
-                  </tbody>
-               </table>
+            <div className="flex flex-col items-center justify-center py-40 text-slate-300">
+               <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center border border-slate-100 shadow-sm mb-6 opacity-40">
+                  <Users size={32} />
+               </div>
+               <p className="font-black text-xs uppercase tracking-[0.3em] text-slate-300">No contacts in this segment</p>
             </div>
           )}
-          {filteredContacts.length === 0 && <div className="flex flex-col items-center justify-center py-32 text-slate-300"><Search size={64} className="mb-6 opacity-5" /><p className="font-black text-sm uppercase tracking-[0.3em] text-slate-300">No contacts found</p></div>}
         </div>
       </div>
 
@@ -470,22 +484,18 @@ const Contacts: React.FC = () => {
                      </div>
                   </div>
                </div>
+               <div className="pt-4 flex gap-4">
+                  <button type="button" onClick={() => setIsAddingContact(false)} className="flex-1 py-4 bg-slate-100 text-slate-400 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-slate-200 transition-all">Cancel</button>
+                  <button 
+                    type="submit" 
+                    disabled={isSaving || !contactForm.name || !contactForm.phone || !contactForm.email || !addrParts.street}
+                    className="flex-[2] py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl shadow-blue-600/30 hover:bg-blue-700 transition-all flex items-center gap-3 active:scale-95 disabled:opacity-50"
+                  >
+                    {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                    {isSaving ? 'Saving...' : 'Sync to CRM'}
+                  </button>
+               </div>
             </form>
-
-            <div className="px-10 py-8 bg-white border-t border-slate-100 flex items-center justify-between">
-              <button onClick={() => setIsAddingContact(false)} className="px-8 py-4 bg-slate-100 text-slate-400 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-slate-200 transition-all">Cancel</button>
-              <div className="flex gap-4">
-                 {contactForm.id && <button type="button" className="px-6 py-4 text-red-400 hover:text-red-600 transition-colors"><Trash2 size={20} /></button>}
-                 <button 
-                  onClick={handleSaveContact}
-                  disabled={isSaving || !contactForm.name || !contactForm.phone || !contactForm.email || !addrParts.street}
-                  className="px-12 py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl shadow-blue-600/30 hover:bg-blue-700 transition-all flex items-center gap-3 active:scale-95 disabled:opacity-50"
-                 >
-                  {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                  {isSaving ? 'Saving...' : 'Sync to CRM'}
-                 </button>
-              </div>
-            </div>
           </div>
         </div>
       )}

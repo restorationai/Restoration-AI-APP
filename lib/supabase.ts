@@ -1,12 +1,111 @@
 
 import { createClient } from '@supabase/supabase-js';
-import { Status, InspectionStatus, Contact, ContactType, Job, PipelineStage } from '../types.ts';
+import { Status, InspectionStatus, Contact, ContactType, Job, PipelineStage, Conversation, Message, ConversationSource } from '../types.ts';
 
 const SUPABASE_URL = 'https://nyscciinkhlutvqkgyvq.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im55c2NjaWlua2hsdXR2cWtneXZxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYyODMxMzMsImV4cCI6MjA4MTg1OTEzM30.4c3QmNYFZS68y4JLtEKwzVo_nQm3pKzucLOajSVRDOA';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+/**
+ * AUTHENTICATION
+ */
+export const getCurrentUser = async () => {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+  
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('*, companies(*)')
+    .eq('id', user.id)
+    .single();
+    
+  return { ...user, profile };
+};
+
+export const signOut = () => supabase.auth.signOut();
+
+/**
+ * MESSAGING & CONVERSATIONS
+ */
+export const fetchConversations = async (companyId: string): Promise<Conversation[]> => {
+  const { data, error } = await supabase
+    .from('conversations')
+    .select('*')
+    .eq('company_id', companyId)
+    .order('last_message_at', { ascending: false });
+
+  if (error) throw error;
+  
+  return data.map(c => ({
+    id: c.id,
+    contactId: c.contact_id,
+    lastMessage: c.last_message || '',
+    timestamp: new Date(c.last_message_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    source: c.source as ConversationSource,
+    status: c.status as any,
+    urgency: c.urgency as any,
+    isStarred: c.is_starred,
+    isUnread: c.is_unread,
+    isInternal: c.is_internal,
+    messages: [] // Messages are fetched per conversation
+  }));
+};
+
+export const fetchMessages = async (conversationId: string): Promise<Message[]> => {
+  const { data, error } = await supabase
+    .from('messages')
+    .select('*')
+    .eq('conversation_id', conversationId)
+    .order('created_at', { ascending: true });
+
+  if (error) throw error;
+
+  return data.map(m => ({
+    id: m.id,
+    sender: m.sender_type as any,
+    senderId: m.sender_id,
+    content: m.content,
+    timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    source: m.source as any,
+    mediaUrls: m.media_urls
+  }));
+};
+
+export const sendMessageToDb = async (msg: Partial<Message>, conversationId: string, companyId: string) => {
+  const { data, error } = await supabase
+    .from('messages')
+    .insert({
+      conversation_id: conversationId,
+      company_id: companyId,
+      sender_type: msg.sender,
+      sender_id: msg.senderId,
+      content: msg.content,
+      direction: 'outbound',
+      source: msg.source,
+      status: 'queued'
+    })
+    .select()
+    .single();
+
+  if (error) throw error;
+
+  // Update conversation last message pointer
+  await supabase
+    .from('conversations')
+    .update({ 
+      last_message: msg.content, 
+      last_message_at: new Date().toISOString(),
+      is_unread: false 
+    })
+    .eq('id', conversationId);
+
+  return data;
+};
+
+/**
+ * UTILS
+ */
 const convertTo12h = (time24: string): string => {
   if (!time24) return '08:00 AM';
   const parts = time24.split(':');
@@ -29,15 +128,16 @@ const convertTo24h = (time12: string): string => {
 const cleanStatus = (status: string): string => {
   if (!status) return '';
   const cleaned = status.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '').trim();
-  
   if (cleaned.toLowerCase().includes('active')) return Status.ACTIVE;
   if (cleaned.toLowerCase().includes('off duty')) return Status.OFF_DUTY;
   if (cleaned.toLowerCase().includes('available')) return InspectionStatus.AVAILABLE;
   if (cleaned.toLowerCase().includes('unavailable')) return InspectionStatus.UNAVAILABLE;
-  
   return cleaned;
 };
 
+/**
+ * DATA FETCHERS
+ */
 export const fetchCompanySettings = async (companyId: string) => {
   const { data, error } = await supabase
     .from('companies')
@@ -52,14 +152,12 @@ export const fetchCompanySettings = async (companyId: string) => {
 
   let managementContacts = data.management_contacts;
   if (!managementContacts || !Array.isArray(managementContacts) || managementContacts.length === 0) {
-    managementContacts = [
-      { 
-        name: data.owner_1_name || '', 
-        phone: data.owner_1_phone || '', 
-        email: data.owner_1_email || '' 
-      }
-    ];
+    managementContacts = [{ name: data.owner_1_name || '', phone: data.owner_1_phone || '', email: data.owner_1_email || '' }];
   }
+
+  const joinedDateFormatted = data.joined_date 
+    ? new Date(data.joined_date).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+    : 'New Account';
 
   return {
     id: data.id,
@@ -77,22 +175,21 @@ export const fetchCompanySettings = async (companyId: string) => {
     serviceMileRadius: data.service_mile_radius ?? 45,
     services: data.services || [],
     ghlLocationId: data.id,
-    status: 'Active',
+    status: data.status || 'Active',
     minimumSchedulingNotice: data.minimum_scheduling_notice ?? 4,
     defaultInspectionDuration: data.default_inspection_duration ?? 120,
     appointmentBufferTime: data.appointment_buffer_time ?? 30,
     serviceAreas: data.service_areas || '',
-    joinedDate: 'Jan 2024',
+    joinedDate: joinedDateFormatted,
     ownerName: managementContacts[0]?.name || '',
     plan: 'Pro AI',
-    totalDispatches: 145,
+    totalDispatches: 0,
     customFieldConfig: []
   };
 };
 
 export const syncCompanySettingsToSupabase = async (companyData: any) => {
   const primaryRecipient = companyData.owners?.[0] || { name: '', phone: '', email: '' };
-  
   const { data, error } = await supabase
     .from('companies')
     .upsert({
@@ -116,10 +213,10 @@ export const syncCompanySettingsToSupabase = async (companyData: any) => {
       service_areas: companyData.serviceAreas,
       minimum_scheduling_notice: companyData.minimumSchedulingNotice,
       default_inspection_duration: companyData.defaultInspectionDuration,
-      appointment_buffer_time: companyData.appointment_buffer_time
+      appointment_buffer_time: companyData.appointmentBufferTime,
+      status: companyData.status
     }, { onConflict: 'id' })
     .select();
-
   if (error) throw new Error(error.message);
   return data;
 };
@@ -127,10 +224,7 @@ export const syncCompanySettingsToSupabase = async (companyData: any) => {
 export const fetchTechniciansFromSupabase = async (clientId: string) => {
   const { data, error } = await supabase
     .from('technicians')
-    .select(`
-      *,
-      technician_schedules (*)
-    `)
+    .select('*, technician_schedules (*)')
     .eq('client_id', clientId);
 
   if (error) throw new Error(error.message);
@@ -176,31 +270,21 @@ export const syncTechnicianToSupabase = async (techData: any) => {
     name: techData.name,
     role: techData.role,
     phone: techData.phone || '(555) 555-5555',
-    client_id: techData.clientId || 'qACWprCW7EhHPYv690nD',
+    client_id: techData.client_id,
     emergency_priority: techData.emergency_priority,
     inspection_priority: techData.inspection_priority,
     emergency_priority_number: techData.emergency_priority_number || 99,
     inspection_priority_number: techData.inspection_priority_number || 99
   };
-
   if (techData.emergency_status) payload.emergency_status = cleanStatus(techData.emergency_status);
   if (techData.inspection_status) payload.inspection_status = cleanStatus(techData.inspection_status);
-
-  const { data, error } = await supabase
-    .from('technicians')
-    .upsert(payload)
-    .select();
-
+  const { data, error } = await supabase.from('technicians').upsert(payload).select();
   if (error) throw new Error(error.message);
   return data;
 };
 
 export const syncScheduleToSupabase = async (techId: string, schedule: any[]) => {
-  await supabase
-    .from('technician_schedules')
-    .delete()
-    .eq('technician_id', techId);
-
+  await supabase.from('technician_schedules').delete().eq('technician_id', techId);
   const rows = schedule.map(s => ({
     technician_id: techId,
     day_name: s.day,
@@ -210,23 +294,14 @@ export const syncScheduleToSupabase = async (techId: string, schedule: any[]) =>
     end_time: (s.end === 'None' || !s.end) ? null : convertTo24h(s.end),
     override_status: s.override || 'None'
   }));
-
-  const { data, error: insertError } = await supabase
-    .from('technician_schedules')
-    .insert(rows);
-
+  const { data, error: insertError } = await supabase.from('technician_schedules').insert(rows);
   if (insertError) throw new Error(insertError.message);
   return data;
 };
 
 export const fetchCalendarEvents = async (clientId: string) => {
-  const { data, error } = await supabase
-    .from('calendar_events')
-    .select('*')
-    .eq('client_id', clientId);
-
+  const { data, error } = await supabase.from('calendar_events').select('*').eq('client_id', clientId);
   if (error) throw new Error(error.message);
-
   return data.map((event: any) => ({
     id: event.id,
     type: event.type,
@@ -243,36 +318,27 @@ export const fetchCalendarEvents = async (clientId: string) => {
 };
 
 export const syncCalendarEventToSupabase = async (event: any, clientId: string) => {
-  const { data, error } = await supabase
-    .from('calendar_events')
-    .upsert({
-      id: event.id,
-      type: event.type,
-      title: event.title,
-      start_time: event.startTime,
-      end_time: event.endTime,
-      contact_id: event.contactId,
-      assigned_technician_ids: event.assignedTechnicianIds,
-      status: event.status,
-      location: event.location,
-      loss_type: event.lossType,
-      description: event.description,
-      client_id: clientId
-    })
-    .select();
-
+  const { data, error } = await supabase.from('calendar_events').upsert({
+    id: event.id,
+    type: event.type,
+    title: event.title,
+    start_time: event.startTime,
+    end_time: event.endTime,
+    contact_id: event.contactId,
+    assigned_technician_ids: event.assignedTechnicianIds,
+    status: event.status,
+    location: event.location,
+    loss_type: event.lossType,
+    description: event.description,
+    client_id: clientId
+  }).select();
   if (error) throw new Error(error.message);
   return data;
 };
 
 export const fetchContactsFromSupabase = async (clientId: string) => {
-  const { data, error } = await supabase
-    .from('contacts')
-    .select('*')
-    .eq('client_id', clientId);
-
+  const { data, error } = await supabase.from('contacts').select('*').eq('client_id', clientId);
   if (error) throw new Error(error.message);
-
   return data.map((c: any) => ({
     id: c.id,
     name: c.name,
@@ -290,31 +356,23 @@ export const fetchContactsFromSupabase = async (clientId: string) => {
 };
 
 export const syncContactToSupabase = async (contact: Contact, clientId: string) => {
-  const { data, error } = await supabase
-    .from('contacts')
-    .upsert({
-      id: contact.id,
-      name: contact.name,
-      phone: contact.phone,
-      email: contact.email,
-      address: contact.address,
-      tags: contact.tags,
-      type: contact.type,
-      pipeline_stage: contact.pipelineStage,
-      client_id: clientId,
-      notes: contact.notes,
-      company: contact.company,
-      vip_status: contact.vipStatus
-    })
-    .select();
-
+  const { data, error } = await supabase.from('contacts').upsert({
+    id: contact.id,
+    name: contact.name,
+    phone: contact.phone,
+    email: contact.email,
+    address: contact.address,
+    tags: contact.tags,
+    type: contact.type,
+    pipeline_stage: contact.pipelineStage,
+    client_id: clientId,
+    notes: contact.notes,
+    company: contact.company,
+    vip_status: contact.vipStatus
+  }).select();
   if (error) throw new Error(error.message);
   return data;
 };
-
-/**
- * JOB PIPELINE SYNC
- */
 
 export const fetchJobsFromSupabase = async (clientId: string): Promise<Job[]> => {
   const { data, error } = await supabase
@@ -322,9 +380,7 @@ export const fetchJobsFromSupabase = async (clientId: string): Promise<Job[]> =>
     .select('*')
     .eq('client_id', clientId)
     .order('created_at', { ascending: false });
-
   if (error) throw new Error(error.message);
-
   return data.map((j: any) => ({
     id: j.id,
     contactId: j.contact_id,
@@ -336,30 +392,23 @@ export const fetchJobsFromSupabase = async (clientId: string): Promise<Job[]> =>
     estimatedValue: Number(j.estimated_value) || 0,
     timestamp: new Date(j.created_at).toLocaleDateString(),
     customFields: j.custom_fields || {},
-    notes: [], // To be synced in next systematic step
-    readings: [], // To be synced in next systematic step
-    financials: [], // To be synced in next systematic step
-    documents: [] // To be synced in next systematic step
+    notes: [], readings: [], financials: [], documents: []
   }));
 };
 
 export const syncJobToSupabase = async (job: Job, clientId: string) => {
-  const { data, error } = await supabase
-    .from('jobs')
-    .upsert({
-      id: job.id,
-      client_id: clientId,
-      contact_id: job.contactId,
-      title: job.title,
-      stage: job.stage,
-      loss_type: job.lossType,
-      urgency: job.urgency,
-      estimated_value: job.estimatedValue,
-      assigned_tech_ids: job.assignedTechIds,
-      custom_fields: job.customFields
-    }, { onConflict: 'id' })
-    .select();
-
+  const { data, error } = await supabase.from('jobs').upsert({
+    id: job.id,
+    client_id: clientId,
+    contact_id: job.contactId,
+    title: job.title,
+    stage: job.stage,
+    loss_type: job.lossType,
+    urgency: job.urgency,
+    estimated_value: job.estimatedValue,
+    assigned_tech_ids: job.assignedTechIds,
+    custom_fields: job.customFields
+  }, { onConflict: 'id' }).select();
   if (error) throw new Error(error.message);
   return data;
 };

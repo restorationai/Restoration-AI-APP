@@ -24,8 +24,8 @@ import {
   CircleCheck,
   Smartphone
 } from 'lucide-react';
-import { MOCK_TECHNICIANS, MOCK_DISPATCH_LOGS, INITIAL_COMPANY_SETTINGS, DEFAULT_SCHEDULE } from '../constants.tsx';
-import { Role, Status, InspectionStatus, Technician, DaySchedule, DispatchStrategy } from '../types.ts';
+import { MOCK_DISPATCH_LOGS, DEFAULT_SCHEDULE } from '../constants.tsx';
+import { Role, Status, InspectionStatus, Technician, DaySchedule } from '../types.ts';
 import { syncTechnicianToSupabase, syncScheduleToSupabase, fetchTechniciansFromSupabase } from '../lib/supabase.ts';
 
 interface DispatchSchedulingProps {
@@ -74,16 +74,16 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
   const [isAddingTech, setIsAddingTech] = useState(false);
 
   const [transferLines, setTransferLines] = useState({
-    primary: '(808) 989-1078',
-    secondary: '(808) 989-1078',
-    third: '(808) 989-1078'
+    primary: '',
+    secondary: '',
+    third: ''
   });
 
   const [directory, setDirectory] = useState([
-    { name: 'Santino', phone: '(808) 989-1078' },
-    { name: 'John', phone: '(499) 595-9995' },
     { name: '', phone: '' },
-    { name: 'Test', phone: '(998) 474-6555' },
+    { name: '', phone: '' },
+    { name: '', phone: '' },
+    { name: '', phone: '' },
     { name: '', phone: '' },
     { name: '', phone: '' }
   ]);
@@ -106,12 +106,23 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
     const loadData = async () => {
       try {
         setIsLoading(true);
-        const data = await fetchTechniciansFromSupabase(INITIAL_COMPANY_SETTINGS.id);
-        setTechnicians(data.length > 0 ? data : MOCK_TECHNICIANS);
+        // Get the current company ID from the session/profile context
+        const { data: { user } } = await (await import('../lib/supabase.ts')).supabase.auth.getUser();
+        if (user) {
+          const { data: profile } = await (await import('../lib/supabase.ts')).supabase
+            .from('profiles')
+            .select('company_id')
+            .eq('id', user.id)
+            .single();
+          
+          if (profile?.company_id) {
+            const data = await fetchTechniciansFromSupabase(profile.company_id);
+            setTechnicians(data);
+          }
+        }
         setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       } catch (err) {
         console.error("Failed to load techs:", err);
-        setTechnicians(MOCK_TECHNICIANS);
       } finally {
         setIsLoading(false);
       }
@@ -202,7 +213,6 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
 
     const finalSchedule = localSchedule.map(s => ({ ...s, override: localOverride }));
     
-    // Calculate new status based on override
     let newEmergencyStatus = editingTech.emergencyStatus;
     let newInspectionStatus = editingTech.inspectionStatus;
 
@@ -229,7 +239,8 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
         inspection_priority_number: !isEmergency ? finalR : editingTech.inspectionPriorityNumber,
         phone: editingTech.phone,
         emergency_status: newEmergencyStatus,
-        inspection_status: newInspectionStatus
+        inspection_status: newInspectionStatus,
+        client_id: editingTech.clientId
       });
 
       await syncScheduleToSupabase(editingTech.id, finalSchedule);
@@ -279,25 +290,36 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
     }
 
     setIsSyncing(true);
-    const newId = `T-${Date.now()}`;
-    const newTech: Technician = {
-        id: newId,
-        name: newTechForm.name,
-        phone: formatPhoneNumber(newTechForm.phone),
-        email: newTechForm.email,
-        role: newTechForm.role,
-        clientId: INITIAL_COMPANY_SETTINGS.id,
-        emergencyPriority: newTechForm.addToEmergency ? "1st Priority" : "None",
-        emergencyPriorityNumber: newTechForm.addToEmergency ? 1 : 99,
-        emergencyStatus: Status.ACTIVE, // Default to Active for now
-        emergencySchedule: [...DEFAULT_SCHEDULE],
-        inspectionPriority: (newTechForm.addToInspection && newTechForm.role !== Role.ASSISTANT) ? "1st Priority" : "None",
-        inspectionPriorityNumber: (newTechForm.addToInspection && newTechForm.role !== Role.ASSISTANT) ? 1 : 99,
-        inspectionStatus: InspectionStatus.AVAILABLE, // Default to Available
-        inspectionSchedule: [...DEFAULT_SCHEDULE],
-    };
-
     try {
+        const { data: { user } } = await (await import('../lib/supabase.ts')).supabase.auth.getUser();
+        if (!user) throw new Error("Session expired.");
+
+        const { data: profile } = await (await import('../lib/supabase.ts')).supabase
+            .from('profiles')
+            .select('company_id')
+            .eq('id', user.id)
+            .single();
+
+        if (!profile?.company_id) throw new Error("Company profile not found.");
+
+        const newId = `T-${Date.now()}`;
+        const newTech: Technician = {
+            id: newId,
+            name: newTechForm.name,
+            phone: formatPhoneNumber(newTechForm.phone),
+            email: newTechForm.email,
+            role: newTechForm.role,
+            clientId: profile.company_id,
+            emergencyPriority: newTechForm.addToEmergency ? "1st Priority" : "None",
+            emergencyPriorityNumber: newTechForm.addToEmergency ? 1 : 99,
+            emergencyStatus: Status.ACTIVE,
+            emergencySchedule: [...DEFAULT_SCHEDULE],
+            inspectionPriority: (newTechForm.addToInspection && newTechForm.role !== Role.ASSISTANT) ? "1st Priority" : "None",
+            inspectionPriorityNumber: (newTechForm.addToInspection && newTechForm.role !== Role.ASSISTANT) ? 1 : 99,
+            inspectionStatus: InspectionStatus.AVAILABLE,
+            inspectionSchedule: [...DEFAULT_SCHEDULE],
+        };
+
         await syncTechnicianToSupabase({
             id: newTech.id,
             name: newTech.name,
@@ -306,7 +328,8 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
             emergency_priority: newTech.emergencyPriority,
             inspection_priority: newTech.inspectionPriority,
             emergency_status: newTech.emergencyStatus,
-            inspection_status: newTech.inspectionStatus
+            inspection_status: newTech.inspectionStatus,
+            client_id: newTech.clientId
         });
         await syncScheduleToSupabase(newTech.id, DEFAULT_SCHEDULE);
         
@@ -388,7 +411,12 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
               );
             }) : (
               <tr>
-                <td colSpan={4} className="px-10 py-10 text-center text-slate-300 font-bold text-sm italic">No {title.toLowerCase()} found in this category.</td>
+                <td colSpan={4} className="px-10 py-16 text-center">
+                   <div className="flex flex-col items-center justify-center opacity-30">
+                      <Users size={48} className="mb-4 text-slate-300" />
+                      <p className="font-black text-xs uppercase tracking-[0.2em] text-slate-400">No {title.toLowerCase()} configured.</p>
+                   </div>
+                </td>
               </tr>
             )}
           </tbody>
@@ -459,7 +487,7 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
                 { id: 'secondary', label: 'SECONDARY BACKUP', value: transferLines.secondary, border: 'border-l-[4px] border-l-slate-400' },
                 { id: 'third', label: 'THIRD TIER LINE', value: transferLines.third, border: 'border-l-[4px] border-l-slate-300' }
               ].map(line => (
-                <div key={line.id} className={`bg-white p-8 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col gap-6 ${line.border}`}>
+                <div key={line.id} className={`bg-white p-8 rounded-[2.5rem] shadow-sm border border-slate-100 flex flex-col gap-6 ${line.border}`}>
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{line.label}</p>
                   <div className="flex items-center gap-4 bg-slate-50/50 p-4 rounded-2xl border border-slate-50">
                     <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center border border-blue-100">
@@ -470,6 +498,7 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
                       value={line.value} 
                       onChange={(e) => setTransferLines({...transferLines, [line.id]: formatPhoneNumber(e.target.value)})}
                       className="bg-transparent border-none outline-none font-black text-lg text-slate-800 w-full"
+                      placeholder="(555) 555-5555"
                     />
                     <Edit2 size={16} className="text-slate-200 cursor-pointer hover:text-blue-500" />
                   </div>
@@ -548,7 +577,7 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
                    </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                   {MOCK_DISPATCH_LOGS.map(log => (
+                   {technicians.length > 0 ? MOCK_DISPATCH_LOGS.map(log => (
                       <tr key={log.id} className="hover:bg-slate-50/30 transition-colors">
                          <td className="px-8 py-6 text-xs font-bold text-slate-500">{log.timestamp}</td>
                          <td className="px-8 py-6">
@@ -563,7 +592,11 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
                             <span className="px-3 py-1 bg-emerald-100 text-emerald-700 text-[10px] font-black uppercase rounded-lg border border-emerald-200">{log.status}</span>
                          </td>
                       </tr>
-                   ))}
+                   )) : (
+                      <tr>
+                        <td colSpan={4} className="px-8 py-16 text-center text-slate-300 font-bold text-sm">No activity recorded for this period.</td>
+                      </tr>
+                   )}
                 </tbody>
              </table>
           </div>

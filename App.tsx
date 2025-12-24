@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, 
@@ -25,8 +26,9 @@ import Contacts from './components/Contacts.tsx';
 import Placeholder from './components/Placeholder.tsx';
 import UnifiedCalendar from './components/UnifiedCalendar.tsx';
 import JobPipeline from './components/JobPipeline.tsx';
+import Auth from './components/Auth.tsx';
 import { INITIAL_COMPANY_SETTINGS } from './constants.tsx';
-import { fetchCompanySettings } from './lib/supabase.ts';
+import { fetchCompanySettings, getCurrentUser, signOut, supabase } from './lib/supabase.ts';
 import { RestorationCompany } from './types.ts';
 
 type Tab = 'dashboard' | 'conversations' | 'calendars' | 'job-pipeline' | 'dispatch' | 'settings' | 'estimates-ai' | 'contacts';
@@ -37,35 +39,68 @@ const App: React.FC = () => {
   const [showAccountModal, setShowAccountModal] = useState(false);
   const [showDialpad, setShowDialpad] = useState(false);
   const [dialNumber, setDialNumber] = useState('');
-  const [companySettings, setCompanySettings] = useState<RestorationCompany>(INITIAL_COMPANY_SETTINGS);
+  const [companySettings, setCompanySettings] = useState<RestorationCompany | null>(null);
+  const [user, setUser] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const initData = async () => {
+    // Initial Auth Check
+    const checkAuth = async () => {
       try {
-        const liveSettings = await fetchCompanySettings(INITIAL_COMPANY_SETTINGS.id);
-        if (liveSettings) {
-          setCompanySettings(liveSettings);
+        const userData = await getCurrentUser();
+        if (userData) {
+          setUser(userData);
+          if (userData.profile?.company_id) {
+            const liveSettings = await fetchCompanySettings(userData.profile.company_id);
+            setCompanySettings(liveSettings);
+          }
         }
       } catch (err) {
-        console.error("Failed to fetch initial company settings:", err);
+        console.error("Auth init error:", err);
       } finally {
         setIsLoading(false);
       }
     };
-    initData();
+    checkAuth();
+
+    // Listen for Auth Changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN' && session?.user) {
+        setIsLoading(true);
+        const userData = await getCurrentUser();
+        setUser(userData);
+        if (userData?.profile?.company_id) {
+          const liveSettings = await fetchCompanySettings(userData.profile.company_id);
+          setCompanySettings(liveSettings);
+        }
+        setIsLoading(false);
+      } else if (event === 'SIGNED_OUT') {
+        setUser(null);
+        setCompanySettings(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  const renderContent = () => {
-    if (isLoading) {
-      return (
-        <div className="flex flex-col items-center justify-center h-full text-slate-400">
-          <Loader2 className="w-12 h-12 animate-spin text-blue-600 mb-4" />
-          <p className="font-black text-xs uppercase tracking-[0.3em]">Connecting to Sarah AI Neural Link...</p>
-        </div>
-      );
-    }
+  const handleLogout = async () => {
+    await signOut();
+  };
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-[#0f172a] flex flex-col items-center justify-center text-slate-400">
+        <Loader2 className="w-12 h-12 animate-spin text-blue-600 mb-4" />
+        <p className="font-black text-xs uppercase tracking-[0.3em]">Connecting to Sarah AI Neural Link...</p>
+      </div>
+    );
+  }
+
+  if (!user || !companySettings) {
+    return <Auth />;
+  }
+
+  const renderContent = () => {
     switch (activeTab) {
       case 'dispatch':
         return <DispatchScheduling onOpenSettings={() => setShowAccountModal(true)} />;
@@ -115,7 +150,7 @@ const App: React.FC = () => {
           {isSidebarOpen && <span className="font-black text-lg whitespace-nowrap tracking-tight">Restoration AI</span>}
         </div>
 
-        <nav className="flex-1 mt-4 space-y-1">
+        <nav className="flex-1 mt-4 space-y-1 overflow-y-auto scrollbar-hide">
           {navItems.map((item) => (
             <button
               key={item.id}
@@ -137,7 +172,7 @@ const App: React.FC = () => {
             <SettingsIcon size={20} />
             {isSidebarOpen && <span className="ml-3 font-black uppercase text-[10px] tracking-widest">Settings</span>}
           </button>
-          <button className="w-full flex items-center px-4 py-3 text-red-400 hover:bg-red-900/20">
+          <button onClick={handleLogout} className="w-full flex items-center px-4 py-3 text-red-400 hover:bg-red-900/20">
             <LogOut size={20} />
             {isSidebarOpen && <span className="ml-3 font-black uppercase text-[10px] tracking-widest">Logout</span>}
           </button>
@@ -206,7 +241,7 @@ const App: React.FC = () => {
           {renderContent()}
         </div>
 
-        {showAccountModal && (
+        {showAccountModal && companySettings && (
           <ManageAccount 
             isOpen={showAccountModal} 
             onClose={() => setShowAccountModal(false)}
