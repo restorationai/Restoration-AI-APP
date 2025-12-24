@@ -179,6 +179,11 @@ export interface Message {
   content: string;
   timestamp: string;
   source: ConversationSource | 'system';
+  direction: 'inbound' | 'outbound';
+  twilioSid?: string;
+  status?: 'delivered' | 'sent' | 'failed' | 'queued';
+  mediaUrls?: string[];
+  errorMessage?: string;
 }
 
 export interface Conversation {
@@ -232,6 +237,9 @@ export interface RestorationCompany {
   plan: string;
   totalDispatches: number;
   customFieldConfig: CustomField[];
+  // New billing & routing fields
+  twilioSubaccountSid?: string;
+  stripeCustomerId?: string;
 }
 
 export interface Technician {

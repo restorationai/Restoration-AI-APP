@@ -1,9 +1,12 @@
-
 import { createClient } from '@supabase/supabase-js';
 import { Status, InspectionStatus, Contact, ContactType, Job, PipelineStage, Conversation, Message, ConversationSource } from '../types.ts';
+import { toE164, toDisplay } from '../utils/phoneUtils.ts';
 
 const SUPABASE_URL = 'https://nyscciinkhlutvqkgyvq.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im55c2NjaWlua2hsdXR2cWtneXZxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYyODMxMzMsImV4cCI6MjA4MTg1OTEzM30.4c3QmNYFZS68y4JLtEKwzVo_nQm3pKzucLOajSVRDOA';
+
+// Provided n8n webhook for Twilio outbound processing
+const N8N_OUTBOUND_WEBHOOK = 'https://restorationai.app.n8n.cloud/webhook/twilio/send-message'; 
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -48,7 +51,7 @@ export const fetchConversations = async (companyId: string): Promise<Conversatio
     isStarred: c.is_starred,
     isUnread: c.is_unread,
     isInternal: c.is_internal,
-    messages: [] // Messages are fetched per conversation
+    messages: [] 
   }));
 };
 
@@ -68,11 +71,36 @@ export const fetchMessages = async (conversationId: string): Promise<Message[]> 
     content: m.content,
     timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     source: m.source as any,
-    mediaUrls: m.media_urls
+    status: m.status as any,
+    direction: m.direction as 'inbound' | 'outbound',
+    twilioSid: m.twilio_sid,
+    mediaUrls: m.media_urls,
+    errorMessage: m.error_message
   }));
 };
 
 export const sendMessageToDb = async (msg: Partial<Message>, conversationId: string, companyId: string) => {
+  // 1. Fetch contact and company info for the outbound routing
+  const { data: convData } = await supabase
+    .from('conversations')
+    .select('contact_id, company_id')
+    .eq('id', conversationId)
+    .single();
+
+  let toPhone = '';
+  let fromPhone = '';
+
+  if (convData) {
+    const [contactRes, companyRes] = await Promise.all([
+      supabase.from('contacts').select('phone').eq('id', convData.contact_id).single(),
+      supabase.from('companies').select('agent_phone_1').eq('id', convData.company_id).single()
+    ]);
+    // These are already E.164 if stored correctly
+    toPhone = contactRes.data?.phone || '';
+    fromPhone = companyRes.data?.agent_phone_1 || '';
+  }
+
+  // 2. Insert into Database as 'queued' and 'outbound'
   const { data, error } = await supabase
     .from('messages')
     .insert({
@@ -90,7 +118,7 @@ export const sendMessageToDb = async (msg: Partial<Message>, conversationId: str
 
   if (error) throw error;
 
-  // Update conversation last message pointer
+  // 3. Update conversation metadata
   await supabase
     .from('conversations')
     .update({ 
@@ -100,11 +128,32 @@ export const sendMessageToDb = async (msg: Partial<Message>, conversationId: str
     })
     .eq('id', conversationId);
 
+  // 4. Trigger n8n for Twilio processing
+  if (N8N_OUTBOUND_WEBHOOK && msg.source !== ConversationSource.INTERNAL) {
+    try {
+      fetch(N8N_OUTBOUND_WEBHOOK, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messageId: data.id,
+          companyId,
+          conversationId,
+          content: msg.content,
+          source: msg.source,
+          to: toPhone,
+          from: fromPhone
+        })
+      });
+    } catch (e) {
+      console.error("Failed to notify n8n workflow:", e);
+    }
+  }
+
   return data;
 };
 
 /**
- * UTILS
+ * UTILITY FUNCTIONS
  */
 const convertTo12h = (time24: string): string => {
   if (!time24) return '08:00 AM';
@@ -163,13 +212,13 @@ export const fetchCompanySettings = async (companyId: string) => {
     id: data.id,
     name: data.name,
     agentName: data.agent_name,
-    agentPhone1: data.agent_phone_1,
+    agentPhone1: toDisplay(data.agent_phone_1), // Format for UI
     dispatchStrategy: data.dispatch_strategy,
     timezone: data.timezone,
     notificationPreference: data.notification_preference,
     maxLeadTechs: data.max_lead_techs,
     maxAssistantTechs: data.max_assistant_techs,
-    owners: managementContacts,
+    owners: managementContacts.map((m: any) => ({ ...m, phone: toDisplay(m.phone) })), // Format for UI
     onsiteResponseMinutes: data.onsite_response_minutes ?? 60,
     centerZipCode: data.center_zip_code || '',
     serviceMileRadius: data.service_mile_radius ?? 45,
@@ -184,27 +233,33 @@ export const fetchCompanySettings = async (companyId: string) => {
     ownerName: managementContacts[0]?.name || '',
     plan: 'Pro AI',
     totalDispatches: 0,
-    customFieldConfig: []
+    customFieldConfig: [],
+    twilioSubaccountSid: data.twilio_subaccount_sid,
+    stripeCustomerId: data.stripe_customer_id
   };
 };
 
 export const syncCompanySettingsToSupabase = async (companyData: any) => {
   const primaryRecipient = companyData.owners?.[0] || { name: '', phone: '', email: '' };
+  
+  // Transform phones to E.164 before saving
+  const ownersE164 = companyData.owners.map((o: any) => ({ ...o, phone: toE164(o.phone) }));
+
   const { data, error } = await supabase
     .from('companies')
     .upsert({
       id: companyData.id,
       name: companyData.name,
       agent_name: companyData.agentName,
-      agent_phone_1: companyData.agentPhone1,
+      agent_phone_1: toE164(companyData.agentPhone1), // Store as E.164
       dispatch_strategy: companyData.dispatchStrategy,
       timezone: companyData.timezone,
       notification_preference: companyData.notificationPreference,
       max_lead_techs: companyData.maxLeadTechs,
       max_assistant_techs: companyData.maxAssistantTechs,
-      management_contacts: companyData.owners,
+      management_contacts: ownersE164,
       owner_1_name: primaryRecipient.name,
-      owner_1_phone: primaryRecipient.phone,
+      owner_1_phone: toE164(primaryRecipient.phone),
       owner_1_email: primaryRecipient.email,
       onsite_response_minutes: companyData.onsiteResponseMinutes,
       center_zip_code: companyData.centerZipCode,
@@ -214,7 +269,9 @@ export const syncCompanySettingsToSupabase = async (companyData: any) => {
       minimum_scheduling_notice: companyData.minimumSchedulingNotice,
       default_inspection_duration: companyData.defaultInspectionDuration,
       appointment_buffer_time: companyData.appointmentBufferTime,
-      status: companyData.status
+      status: companyData.status,
+      twilio_subaccount_sid: companyData.twilioSubaccountSid,
+      stripe_customer_id: companyData.stripeCustomerId
     }, { onConflict: 'id' })
     .select();
   if (error) throw new Error(error.message);
@@ -226,9 +283,7 @@ export const fetchTechniciansFromSupabase = async (clientId: string) => {
     .from('technicians')
     .select('*, technician_schedules (*)')
     .eq('client_id', clientId);
-
   if (error) throw new Error(error.message);
-
   return data.map((tech: any) => {
     const rawSchedules = tech.technician_schedules || [];
     const dayOrder = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -243,12 +298,11 @@ export const fetchTechniciansFromSupabase = async (clientId: string) => {
         override: match.override_status || 'None'
       } : { day, enabled: true, is24Hours: false, start: '08:00 AM', end: '05:00 PM', override: 'None' };
     });
-
     return {
       id: tech.id,
       name: tech.name,
       role: tech.role,
-      phone: tech.phone,
+      phone: toDisplay(tech.phone), // Format for UI
       email: tech.email || '',
       clientId: tech.client_id,
       emergencyPriority: tech.emergency_priority,
@@ -269,7 +323,7 @@ export const syncTechnicianToSupabase = async (techData: any) => {
     id: techData.id,
     name: techData.name,
     role: techData.role,
-    phone: techData.phone || '(555) 555-5555',
+    phone: toE164(techData.phone || '(555) 555-5555'), // Store as E.164
     client_id: techData.client_id,
     emergency_priority: techData.emergency_priority,
     inspection_priority: techData.inspection_priority,
@@ -324,7 +378,7 @@ export const syncCalendarEventToSupabase = async (event: any, clientId: string) 
     title: event.title,
     start_time: event.startTime,
     end_time: event.endTime,
-    contact_id: event.contactId,
+    contact_id: event.contact_id,
     assigned_technician_ids: event.assignedTechnicianIds,
     status: event.status,
     location: event.location,
@@ -342,7 +396,7 @@ export const fetchContactsFromSupabase = async (clientId: string) => {
   return data.map((c: any) => ({
     id: c.id,
     name: c.name,
-    phone: c.phone,
+    phone: toDisplay(c.phone), // Format for UI
     email: c.email,
     address: c.address,
     tags: c.tags || [],
@@ -359,7 +413,7 @@ export const syncContactToSupabase = async (contact: Contact, clientId: string) 
   const { data, error } = await supabase.from('contacts').upsert({
     id: contact.id,
     name: contact.name,
-    phone: contact.phone,
+    phone: toE164(contact.phone), // Store as E.164
     email: contact.email,
     address: contact.address,
     tags: contact.tags,

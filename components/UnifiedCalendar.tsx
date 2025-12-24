@@ -37,6 +37,7 @@ import {
 import { MOCK_CALENDAR_EVENTS, MOCK_TECHNICIANS, MOCK_CONTACTS, INITIAL_COMPANY_SETTINGS } from '../constants';
 import { CalendarEvent, AppointmentType, Technician, Role, Status, InspectionStatus, Contact, ContactType } from '../types';
 import { fetchCalendarEvents, syncCalendarEventToSupabase, fetchTechniciansFromSupabase, fetchCompanySettings, syncContactToSupabase, fetchContactsFromSupabase } from '../lib/supabase';
+import { formatPhoneNumberInput } from '../utils/phoneUtils.ts';
 
 // Define missing types for calendar state management
 type CalendarMode = 'all' | 'emergency' | 'inspection';
@@ -45,18 +46,6 @@ type ViewType = 'day' | 'week' | 'month';
 const US_STATES = [
   "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"
 ];
-
-// Formatting helper for phone numbers
-const formatPhoneNumber = (value: string) => {
-  if (!value) return value;
-  const phoneNumber = value.replace(/[^\d]/g, '').slice(0, 10);
-  const phoneNumberLength = phoneNumber.length;
-  if (phoneNumberLength < 4) return phoneNumber;
-  if (phoneNumberLength < 7) {
-    return `(${phoneNumber.slice(0, 3)}) ${phoneNumber.slice(3)}`;
-  }
-  return `(${phoneNumber.slice(0, 3)}) ${phoneNumber.slice(3, 6)}-${phoneNumber.slice(6, 10)}`;
-};
 
 const generateUUID = () => {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -368,7 +357,7 @@ const UnifiedCalendar: React.FC = () => {
       const newContact: Contact = {
         id: `con-${Date.now()}`,
         name: newContactForm.name,
-        phone: newContactForm.phone,
+        phone: newContactForm.phone, // lib/supabase.ts handles E.164 conversion
         email: newContactForm.email,
         address: fullAddress,
         tags: ['New Lead', 'Manual Entry'],
@@ -962,7 +951,7 @@ const UnifiedCalendar: React.FC = () => {
                           type="text" 
                           required 
                           value={newContactForm.phone} 
-                          onChange={e => setNewContactForm({...newContactForm, phone: formatPhoneNumber(e.target.value)})} 
+                          onChange={e => setNewContactForm({...newContactForm, phone: formatPhoneNumberInput(e.target.value)})} 
                           onKeyDown={(e) => e.stopPropagation()} 
                           className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm transition-all" 
                           placeholder="(555) 555-5555" 

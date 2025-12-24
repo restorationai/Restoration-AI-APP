@@ -155,14 +155,18 @@ export const MOCK_CONVERSATIONS: Conversation[] = [
         sender: 'contact',
         content: 'I have a major leak in my kitchen!',
         timestamp: '10:00 AM',
-        source: ConversationSource.SMS
+        source: ConversationSource.SMS,
+        // Added missing required direction property
+        direction: 'inbound'
       },
       {
         id: 'm2',
         sender: 'ai',
         content: 'I am sorry to hear that. I am sending a technician now.',
         timestamp: '10:02 AM',
-        source: ConversationSource.SMS
+        source: ConversationSource.SMS,
+        // Added missing required direction property
+        direction: 'outbound'
       }
     ]
   }

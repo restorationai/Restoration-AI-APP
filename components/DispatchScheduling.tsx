@@ -27,21 +27,11 @@ import {
 import { MOCK_DISPATCH_LOGS, DEFAULT_SCHEDULE } from '../constants.tsx';
 import { Role, Status, InspectionStatus, Technician, DaySchedule } from '../types.ts';
 import { syncTechnicianToSupabase, syncScheduleToSupabase, fetchTechniciansFromSupabase } from '../lib/supabase.ts';
+import { formatPhoneNumberInput, toDisplay } from '../utils/phoneUtils.ts';
 
 interface DispatchSchedulingProps {
   onOpenSettings: () => void;
 }
-
-const formatPhoneNumber = (value: string) => {
-  if (!value) return value;
-  const phoneNumber = value.replace(/[^\d]/g, '').slice(0, 10);
-  const phoneNumberLength = phoneNumber.length;
-  if (phoneNumberLength < 4) return phoneNumber;
-  if (phoneNumberLength < 7) {
-    return `(${phoneNumber.slice(0, 3)}) ${phoneNumber.slice(3)}`;
-  }
-  return `(${phoneNumber.slice(0, 3)}) ${phoneNumber.slice(3, 6)}-${phoneNumber.slice(6, 10)}`;
-};
 
 const GENERATE_TIME_SLOTS = () => {
   const slots: string[] = [];
@@ -306,7 +296,7 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
         const newTech: Technician = {
             id: newId,
             name: newTechForm.name,
-            phone: formatPhoneNumber(newTechForm.phone),
+            phone: newTechForm.phone,
             email: newTechForm.email,
             role: newTechForm.role,
             clientId: profile.company_id,
@@ -496,7 +486,7 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
                     <input 
                       type="text" 
                       value={line.value} 
-                      onChange={(e) => setTransferLines({...transferLines, [line.id]: formatPhoneNumber(e.target.value)})}
+                      onChange={(e) => setTransferLines({...transferLines, [line.id]: formatPhoneNumberInput(e.target.value)})}
                       className="bg-transparent border-none outline-none font-black text-lg text-slate-800 w-full"
                       placeholder="(555) 555-5555"
                     />
@@ -546,7 +536,7 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
                             value={entry.phone}
                             onChange={(e) => {
                               const newDir = [...directory];
-                              newDir[idx].phone = formatPhoneNumber(e.target.value);
+                              newDir[idx].phone = formatPhoneNumberInput(e.target.value);
                               setDirectory(newDir);
                             }}
                             className="w-full pl-11 pr-5 py-3.5 bg-white border border-slate-100 rounded-2xl text-sm font-black text-slate-800 focus:ring-2 focus:ring-blue-600/10 outline-none transition-all shadow-sm"
@@ -783,12 +773,12 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
                 <div className="space-y-4">
                    <div>
                       <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Full Name</label>
-                      <input type="text" value={newTechForm.name} onChange={e => setNewTechForm({...newTechForm, name: e.target.value})} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm" placeholder="e.g. Michael Scott" />
+                      <input type="text" value={newTechForm.name} onChange={e => setNewTechForm({...newTechForm, name: e.target.value})} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm" placeholder=" Michael Scott" />
                    </div>
                    <div className="grid grid-cols-2 gap-4">
                       <div>
                         <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Phone</label>
-                        <input type="text" value={newTechForm.phone} onChange={e => setNewTechForm({...newTechForm, phone: formatPhoneNumber(e.target.value)})} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm" placeholder="(555) 000-0000" />
+                        <input type="text" value={newTechForm.phone} onChange={e => setNewTechForm({...newTechForm, phone: formatPhoneNumberInput(e.target.value)})} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm" placeholder="(555) 000-0000" />
                       </div>
                       <div>
                         <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Email</label>

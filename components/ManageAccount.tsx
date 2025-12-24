@@ -25,6 +25,7 @@ import {
 import { SERVICE_OPTIONS, TIMEZONES } from '../constants';
 import { DispatchStrategy, NotificationPreference, RestorationCompany } from '../types';
 import { syncCompanySettingsToSupabase } from '../lib/supabase.ts';
+import { formatPhoneNumberInput } from '../utils/phoneUtils.ts';
 
 interface ManageAccountProps {
   isOpen: boolean;
@@ -32,17 +33,6 @@ interface ManageAccountProps {
   companySettings: RestorationCompany;
   onSettingsUpdate: (settings: RestorationCompany) => void;
 }
-
-const formatPhoneNumber = (value: string) => {
-  if (!value) return value;
-  const phoneNumber = value.replace(/[^\d]/g, '').slice(0, 10);
-  const phoneNumberLength = phoneNumber.length;
-  if (phoneNumberLength < 4) return phoneNumber;
-  if (phoneNumberLength < 7) {
-    return `(${phoneNumber.slice(0, 3)}) ${phoneNumber.slice(3)}`;
-  }
-  return `(${phoneNumber.slice(0, 3)}) ${phoneNumber.slice(3, 6)}-${phoneNumber.slice(6, 10)}`;
-};
 
 const ManageAccount: React.FC<ManageAccountProps> = ({ isOpen, onClose, companySettings, onSettingsUpdate }) => {
   const [expandedSection, setExpandedSection] = useState<string | null>('business');
@@ -91,7 +81,7 @@ const ManageAccount: React.FC<ManageAccountProps> = ({ isOpen, onClose, companyS
     const updatedOwners = [...settings.owners];
     let finalValue = value;
     if (field === 'phone') {
-      finalValue = formatPhoneNumber(value);
+      finalValue = formatPhoneNumberInput(value);
     }
     updatedOwners[index] = { ...updatedOwners[index], [field]: finalValue };
     setSettings({ ...settings, owners: updatedOwners });
@@ -101,6 +91,7 @@ const ManageAccount: React.FC<ManageAccountProps> = ({ isOpen, onClose, companyS
     try {
       setIsSaving(true);
       const payload = { ...settings };
+      // Syncing will internally handle E.164 conversion in lib/supabase.ts
       await syncCompanySettingsToSupabase(payload);
       onSettingsUpdate(payload);
       alert('Settings successfully deployed to Sarah AI.');

@@ -25,17 +25,7 @@ import {
 } from 'lucide-react';
 import { Contact, ContactType } from '../types';
 import { syncContactToSupabase, fetchContactsFromSupabase } from '../lib/supabase';
-
-const formatPhoneNumber = (value: string) => {
-  if (!value) return value;
-  const phoneNumber = value.replace(/[^\d]/g, '');
-  const phoneNumberLength = phoneNumber.length;
-  if (phoneNumberLength < 4) return phoneNumber;
-  if (phoneNumberLength < 7) {
-    return `(${phoneNumber.slice(0, 3)}) ${phoneNumber.slice(3)}`;
-  }
-  return `(${phoneNumber.slice(0, 3)}) ${phoneNumber.slice(3, 6)}-${phoneNumber.slice(6, 10)}`;
-};
+import { formatPhoneNumberInput } from '../utils/phoneUtils.ts';
 
 const US_STATES = [
   "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"
@@ -152,7 +142,7 @@ const Contacts: React.FC = () => {
       const finalContact: Contact = {
         id: newId,
         name: contactForm.name || 'Unknown',
-        phone: contactForm.phone || '',
+        phone: contactForm.phone || '', // lib/supabase.ts will handle E.164 conversion
         email: contactForm.email || '',
         address: fullAddress,
         company: contactForm.company,
@@ -417,7 +407,7 @@ const Contacts: React.FC = () => {
                       type="text" 
                       required 
                       value={contactForm.phone} 
-                      onChange={e => setContactForm({...contactForm, phone: formatPhoneNumber(e.target.value)})} 
+                      onChange={e => setContactForm({...contactForm, phone: formatPhoneNumberInput(e.target.value)})} 
                       className="w-full px-6 py-4 bg-white border border-slate-100 rounded-2xl text-sm font-bold shadow-sm focus:ring-4 focus:ring-blue-600/5 transition-all outline-none" 
                       placeholder="(XXX) XXX-XXXX" 
                     />
