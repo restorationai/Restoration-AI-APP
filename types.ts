@@ -192,6 +192,7 @@ export interface Conversation {
   teamMemberIds?: string[]; 
   name?: string; 
   lastMessage: string;
+  lastMessagePreview?: string;
   timestamp: string;
   source: ConversationSource;
   status: 'ai-active' | 'human-needed' | 'resolved';

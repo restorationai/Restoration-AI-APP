@@ -1,5 +1,4 @@
-
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { 
   Search, 
   PhoneCall, 
@@ -28,17 +27,19 @@ import {
   Archive,
   UserCircle,
   Loader2,
-  AlertCircle
+  AlertCircle,
+  User,
+  ChevronRight
 } from 'lucide-react';
-import { MOCK_CONTACTS, MOCK_TEAM, INITIAL_COMPANY_SETTINGS } from '../constants';
-import { ConversationSource, ContactType, Conversation, Message } from '../types';
-import { fetchConversations, fetchMessages, sendMessageToDb, getCurrentUser, supabase } from '../lib/supabase';
+import { ConversationSource, ContactType, Conversation, Message, Contact } from '../types';
+import { fetchConversations, fetchMessages, sendMessageToDb, getCurrentUser, supabase, fetchContactsFromSupabase, createConversation } from '../lib/supabase';
 
 type SidebarSection = 'inbox' | 'internal-chat';
 type FilterType = 'all' | 'unread' | 'starred' | 'homeowner' | 'partner';
 
 const Inbox: React.FC = () => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<SidebarSection>('inbox');
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
@@ -47,12 +48,15 @@ const Inbox: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  
+  const [isNewMessageModalOpen, setIsNewMessageModalOpen] = useState(false);
+  const [contactSearch, setContactSearch] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const selectedConv = conversations.find(c => c.id === selectedConvId);
-  const selectedContact = MOCK_CONTACTS.find(c => c.id === selectedConv?.contactId);
+  const selectedContact = contacts.find(c => c.id === selectedConv?.contactId);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -68,8 +72,12 @@ const Inbox: React.FC = () => {
         if (user?.profile?.company_id) {
           setCompanyId(user.profile.company_id);
           setCurrentUserId(user.id);
-          const fetched = await fetchConversations(user.profile.company_id);
-          setConversations(fetched);
+          const [fetchedConvs, fetchedContacts] = await Promise.all([
+            fetchConversations(user.profile.company_id),
+            fetchContactsFromSupabase(user.profile.company_id)
+          ]);
+          setConversations(fetchedConvs);
+          setContacts(fetchedContacts);
         }
       } catch (err) {
         console.error("Failed to load inbox:", err);
@@ -97,17 +105,22 @@ const Inbox: React.FC = () => {
             timestamp: new Date(newMessage.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             source: newMessage.source as any,
             status: newMessage.status as any,
-            // Added missing required direction property
             direction: newMessage.direction as 'inbound' | 'outbound'
           };
           
           setConversations(prev => prev.map(c => 
             c.id === newMessage.conversation_id 
-              ? { ...c, messages: c.id === selectedConvId ? [...c.messages, formatted] : c.messages, lastMessage: newMessage.content, timestamp: 'Just now', isUnread: c.id !== selectedConvId } 
+              ? { 
+                  ...c, 
+                  messages: c.id === selectedConvId ? [...c.messages, formatted] : c.messages, 
+                  lastMessage: newMessage.content, 
+                  lastMessagePreview: newMessage.content, // Realtime update
+                  timestamp: 'Just now', 
+                  isUnread: c.id !== selectedConvId 
+                } 
               : c
           ));
         } else if (payload.eventType === 'UPDATE') {
-          // Handle status updates (delivered, read, failed)
           setConversations(prev => prev.map(c => {
             if (c.id === newMessage.conversation_id) {
               return {
@@ -122,9 +135,10 @@ const Inbox: React.FC = () => {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'conversations', filter: `company_id=eq.${companyId}` }, (payload) => {
         const nc = payload.new as any;
         setConversations(prev => [{
-          id: nc.id,
+          id: String(nc.id),
           contactId: nc.contact_id,
           lastMessage: nc.last_message || '',
+          lastMessagePreview: nc.last_message_preview || nc.last_message || '',
           timestamp: 'Just now',
           source: nc.source as any,
           status: nc.status as any,
@@ -157,6 +171,13 @@ const Inbox: React.FC = () => {
     return true;
   });
 
+  const filteredContactsList = useMemo(() => {
+    return contacts.filter(c => 
+      c.name.toLowerCase().includes(contactSearch.toLowerCase()) ||
+      c.phone.includes(contactSearch)
+    );
+  }, [contacts, contactSearch]);
+
   const handleSendMessage = async () => {
     if (!composerText.trim() || !selectedConvId || !companyId) return;
     const msgPayload = {
@@ -170,6 +191,29 @@ const Inbox: React.FC = () => {
       setComposerText('');
     } catch (err) {
       console.error("Failed to send message:", err);
+    }
+  };
+
+  const handleStartNewConversation = async (contactId: string) => {
+    if (!companyId) return;
+    
+    // 1. Check if conversation already exists
+    const existing = conversations.find(c => c.contactId === contactId && !c.isInternal);
+    if (existing) {
+      setSelectedConvId(existing.id);
+      setIsNewMessageModalOpen(false);
+      return;
+    }
+
+    // 2. Create new conversation
+    try {
+      const newConv = await createConversation(contactId, companyId);
+      setConversations(prev => [newConv, ...prev]);
+      setSelectedConvId(newConv.id);
+      setIsNewMessageModalOpen(false);
+    } catch (err) {
+      console.error("Failed to initialize conversation:", err);
+      alert("Could not start conversation. Please try again.");
     }
   };
 
@@ -199,7 +243,10 @@ const Inbox: React.FC = () => {
           <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-black text-sm">R</div>
           <span className="font-black text-sm uppercase tracking-tight text-slate-800">Unified Inbox</span>
         </div>
-        <button className="w-full py-3.5 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 mb-8 shadow-xl shadow-blue-600/20 hover:bg-blue-700 transition-all active:scale-95">
+        <button 
+          onClick={() => setIsNewMessageModalOpen(true)}
+          className="w-full py-3.5 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 mb-8 shadow-xl shadow-blue-600/20 hover:bg-blue-700 transition-all active:scale-95"
+        >
           <Plus size={16} /> New Message
         </button>
         <div className="flex-1 space-y-2">
@@ -228,7 +275,7 @@ const Inbox: React.FC = () => {
         </div>
         <div className="flex-1 overflow-y-auto scrollbar-hide">
           {filteredConversations.map((conv) => {
-            const contact = MOCK_CONTACTS.find(c => c.id === conv.contactId);
+            const contact = contacts.find(c => c.id === conv.contactId);
             return (
               <button key={conv.id} onClick={() => setSelectedConvId(conv.id)} className={`w-full p-5 border-b border-slate-50 text-left transition-all relative ${selectedConvId === conv.id ? 'bg-blue-50/40' : 'hover:bg-slate-50/50'}`}>
                 {conv.isUnread && <div className="absolute right-4 top-1/2 -translate-y-1/2 w-2 h-2 bg-blue-600 rounded-full"></div>}
@@ -241,7 +288,10 @@ const Inbox: React.FC = () => {
                       <span className="font-black text-xs truncate">{contact?.name || conv.name || 'Chat'}</span>
                       <span className="text-[9px] font-black text-slate-300 uppercase">{conv.timestamp}</span>
                     </div>
-                    <p className="text-[11px] truncate font-bold text-slate-400 leading-none">{conv.lastMessage}</p>
+                    {/* Prioritizing the advisor's suggested preview field */}
+                    <p className="text-[11px] truncate font-bold text-slate-400 leading-none">
+                      {conv.lastMessagePreview || conv.lastMessage}
+                    </p>
                   </div>
                 </div>
               </button>
@@ -311,6 +361,59 @@ const Inbox: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* New Message Modal */}
+      {isNewMessageModalOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-white w-full max-w-lg rounded-[3rem] shadow-2xl overflow-hidden flex flex-col border border-white/20">
+             <div className="px-10 py-8 bg-slate-900 text-white flex justify-between items-center">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg"><Plus size={24} /></div>
+                  <h3 className="text-xl font-black uppercase tracking-tight">New Message</h3>
+                </div>
+                <button onClick={() => setIsNewMessageModalOpen(false)} className="p-2 hover:bg-white/10 rounded-full transition-colors"><X size={28} /></button>
+             </div>
+             
+             <div className="p-8 space-y-6">
+                <div className="relative">
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                  <input 
+                    type="text" 
+                    placeholder="Search contacts..." 
+                    value={contactSearch}
+                    onChange={(e) => setContactSearch(e.target.value)}
+                    className="w-full pl-12 pr-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl text-sm font-bold outline-none focus:ring-4 focus:ring-blue-600/5 transition-all"
+                  />
+                </div>
+
+                <div className="max-h-[400px] overflow-y-auto scrollbar-hide space-y-2">
+                  {filteredContactsList.map(contact => (
+                    <button 
+                      key={contact.id} 
+                      onClick={() => handleStartNewConversation(contact.id)}
+                      className="w-full flex items-center gap-4 p-4 rounded-2xl hover:bg-blue-50 transition-all text-left group"
+                    >
+                      <div className="w-11 h-11 rounded-xl bg-slate-900 text-white flex items-center justify-center font-black text-xs uppercase shadow-sm group-hover:bg-blue-600 transition-colors">
+                        {contact.name.split(' ').map(n => n[0]).join('')}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-black text-slate-800 text-sm">{contact.name}</p>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{contact.phone}</p>
+                      </div>
+                      <ChevronRight size={16} className="text-slate-300 group-hover:text-blue-600 transition-colors" />
+                    </button>
+                  ))}
+                  {filteredContactsList.length === 0 && (
+                    <div className="p-20 text-center text-slate-300">
+                      <User size={32} className="mx-auto mb-4 opacity-20" />
+                      <p className="font-black text-[10px] uppercase tracking-widest">No contacts found</p>
+                    </div>
+                  )}
+                </div>
+             </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

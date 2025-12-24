@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, 
@@ -17,7 +16,8 @@ import {
   Contact as ContactIcon,
   Phone,
   Delete,
-  Loader2
+  Loader2,
+  RefreshCw
 } from 'lucide-react';
 import DispatchScheduling from './components/DispatchScheduling.tsx';
 import ManageAccount from './components/ManageAccount.tsx';
@@ -42,41 +42,41 @@ const App: React.FC = () => {
   const [companySettings, setCompanySettings] = useState<RestorationCompany | null>(null);
   const [user, setUser] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [bootError, setBootError] = useState<string | null>(null);
 
-  useEffect(() => {
-    // Initial Auth Check
-    const checkAuth = async () => {
-      try {
-        const userData = await getCurrentUser();
-        if (userData) {
-          setUser(userData);
-          if (userData.profile?.company_id) {
-            const liveSettings = await fetchCompanySettings(userData.profile.company_id);
-            setCompanySettings(liveSettings);
-          }
-        }
-      } catch (err) {
-        console.error("Auth init error:", err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    checkAuth();
-
-    // Listen for Auth Changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN' && session?.user) {
-        setIsLoading(true);
-        const userData = await getCurrentUser();
+  const initSession = async () => {
+    try {
+      setIsLoading(true);
+      setBootError(null);
+      const userData = await getCurrentUser();
+      if (userData) {
         setUser(userData);
-        if (userData?.profile?.company_id) {
+        if (userData.profile?.company_id) {
           const liveSettings = await fetchCompanySettings(userData.profile.company_id);
           setCompanySettings(liveSettings);
         }
-        setIsLoading(false);
+      }
+    } catch (err: any) {
+      console.error("Auth init error:", err);
+      setBootError(err.message || "Failed to synchronize with database.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    initSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN' && session?.user) {
+        // Only trigger if we don't already have a user to prevent double-loading
+        if (!user) {
+          initSession();
+        }
       } else if (event === 'SIGNED_OUT') {
         setUser(null);
         setCompanySettings(null);
+        setIsLoading(false);
       }
     });
 
@@ -91,7 +91,25 @@ const App: React.FC = () => {
     return (
       <div className="min-h-screen bg-[#0f172a] flex flex-col items-center justify-center text-slate-400">
         <Loader2 className="w-12 h-12 animate-spin text-blue-600 mb-4" />
-        <p className="font-black text-xs uppercase tracking-[0.3em]">Connecting to Sarah AI Neural Link...</p>
+        <p className="font-black text-[10px] uppercase tracking-[0.3em] opacity-80">Connecting to Sarah AI Neural Link...</p>
+      </div>
+    );
+  }
+
+  if (bootError) {
+    return (
+      <div className="min-h-screen bg-[#0f172a] flex flex-col items-center justify-center p-10 text-center">
+        <div className="w-20 h-20 bg-red-500/10 border border-red-500/20 rounded-[2rem] flex items-center justify-center text-red-500 mb-8 shadow-2xl">
+          <RefreshCw size={32} />
+        </div>
+        <h2 className="text-white text-2xl font-black mb-4 tracking-tight uppercase">Sync Failure Detected</h2>
+        <p className="text-slate-400 max-w-md text-sm font-bold leading-relaxed mb-10">{bootError}</p>
+        <button 
+          onClick={() => window.location.reload()} 
+          className="px-10 py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl shadow-blue-600/20 hover:bg-blue-700 transition-all active:scale-95"
+        >
+          Re-initialize System
+        </button>
       </div>
     );
   }
