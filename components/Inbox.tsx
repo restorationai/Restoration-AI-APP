@@ -99,37 +99,35 @@ const Inbox: React.FC = () => {
         if (payload.eventType === 'INSERT') {
           const formatted: Message = {
             id: newMessage.id,
-            sender: newMessage.sender_type,
+            sender: (newMessage.sender_type === 'User' ? 'agent' : newMessage.sender_type === 'Contact' ? 'contact' : 'ai') as any,
+            sender_type: newMessage.sender_type,
+            message_type: newMessage.message_type,
             senderId: newMessage.sender_id,
             content: newMessage.content,
             timestamp: new Date(newMessage.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            source: newMessage.source as any,
+            source: newMessage.message_type as any,
             status: newMessage.status as any,
             direction: newMessage.direction as 'inbound' | 'outbound'
           };
           
-          setConversations(prev => prev.map(c => 
-            c.id === newMessage.conversation_id 
-              ? { 
-                  ...c, 
-                  messages: c.id === selectedConvId ? [...c.messages, formatted] : c.messages, 
-                  lastMessage: newMessage.content, 
-                  lastMessagePreview: newMessage.content, // Realtime update
-                  timestamp: 'Just now', 
-                  isUnread: c.id !== selectedConvId 
-                } 
-              : c
-          ));
-        } else if (payload.eventType === 'UPDATE') {
-          setConversations(prev => prev.map(c => {
-            if (c.id === newMessage.conversation_id) {
-              return {
-                ...c,
-                messages: c.messages.map(m => m.id === newMessage.id ? { ...m, status: newMessage.status } : m)
-              };
-            }
-            return c;
-          }));
+          setConversations(prev => {
+            const updated = prev.map(c => 
+              c.id === newMessage.conversation_id 
+                ? { 
+                    ...c, 
+                    messages: c.id === selectedConvId ? [...c.messages, formatted] : c.messages, 
+                    lastMessage: newMessage.content, 
+                    lastMessagePreview: newMessage.content, 
+                    last_message_at: newMessage.created_at,
+                    timestamp: 'Just now', 
+                    isUnread: c.id !== selectedConvId 
+                  } 
+                : c
+            );
+            return [...updated].sort((a, b) => 
+              new Date(b.last_message_at || 0).getTime() - new Date(a.last_message_at || 0).getTime()
+            );
+          });
         }
       })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'conversations', filter: `company_id=eq.${companyId}` }, (payload) => {
@@ -139,13 +137,14 @@ const Inbox: React.FC = () => {
           contactId: nc.contact_id,
           lastMessage: nc.last_message || '',
           lastMessagePreview: nc.last_message_preview || nc.last_message || '',
+          last_message_at: nc.last_message_at,
           timestamp: 'Just now',
           source: nc.source as any,
           status: nc.status as any,
           urgency: nc.urgency as any,
           isStarred: nc.is_starred,
           isUnread: nc.is_unread,
-          isInternal: nc.is_internal,
+          type: nc.type as 'external' | 'internal',
           messages: []
         }, ...prev]);
       })
@@ -164,8 +163,10 @@ const Inbox: React.FC = () => {
   }, [selectedConvId]);
 
   const filteredConversations = conversations.filter(c => {
-    if (activeSection === 'internal-chat' && !c.isInternal) return false;
-    if (activeSection === 'inbox' && c.isInternal) return false;
+    // Advisor Recommended Logic: Separation based on 'type' column
+    if (activeSection === 'internal-chat' && c.type !== 'internal') return false;
+    if (activeSection === 'inbox' && c.type === 'internal') return false;
+    
     if (activeFilter === 'unread') return c.isUnread;
     if (activeFilter === 'starred') return c.isStarred;
     return true;
@@ -184,7 +185,7 @@ const Inbox: React.FC = () => {
       sender: 'agent' as const,
       senderId: currentUserId || 'tm1',
       content: composerText,
-      source: (selectedChannel.toLowerCase() === 'chat' ? (selectedConv?.isInternal ? ConversationSource.INTERNAL : ConversationSource.CHAT) : selectedChannel.toLowerCase()) as ConversationSource
+      source: (selectedChannel.toLowerCase() === 'chat' ? (selectedConv?.type === 'internal' ? ConversationSource.INTERNAL : ConversationSource.CHAT) : selectedChannel.toLowerCase()) as ConversationSource
     };
     try {
       await sendMessageToDb(msgPayload, selectedConvId, companyId);
@@ -197,15 +198,13 @@ const Inbox: React.FC = () => {
   const handleStartNewConversation = async (contactId: string) => {
     if (!companyId) return;
     
-    // 1. Check if conversation already exists
-    const existing = conversations.find(c => c.contactId === contactId && !c.isInternal);
+    const existing = conversations.find(c => c.contactId === contactId);
     if (existing) {
       setSelectedConvId(existing.id);
       setIsNewMessageModalOpen(false);
       return;
     }
 
-    // 2. Create new conversation
     try {
       const newConv = await createConversation(contactId, companyId);
       setConversations(prev => [newConv, ...prev]);
@@ -250,10 +249,10 @@ const Inbox: React.FC = () => {
           <Plus size={16} /> New Message
         </button>
         <div className="flex-1 space-y-2">
-          <button onClick={() => setActiveSection('inbox')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all font-black text-[11px] uppercase tracking-widest ${activeSection === 'inbox' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'text-slate-500 hover:bg-slate-50'}`}>
+          <button onClick={() => { setActiveSection('inbox'); setSelectedConvId(null); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all font-black text-[11px] uppercase tracking-widest ${activeSection === 'inbox' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'text-slate-500 hover:bg-slate-50'}`}>
             <Users size={18} /> Company Inbox
           </button>
-          <button onClick={() => setActiveSection('internal-chat')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all font-black text-[11px] uppercase tracking-widest ${activeSection === 'internal-chat' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'text-slate-500 hover:bg-slate-50'}`}>
+          <button onClick={() => { setActiveSection('internal-chat'); setSelectedConvId(null); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all font-black text-[11px] uppercase tracking-widest ${activeSection === 'internal-chat' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' : 'text-slate-500 hover:bg-slate-50'}`}>
             <MessageCircle size={18} /> Internal Chat
           </button>
         </div>
@@ -288,7 +287,6 @@ const Inbox: React.FC = () => {
                       <span className="font-black text-xs truncate">{contact?.name || conv.name || 'Chat'}</span>
                       <span className="text-[9px] font-black text-slate-300 uppercase">{conv.timestamp}</span>
                     </div>
-                    {/* Prioritizing the advisor's suggested preview field */}
                     <p className="text-[11px] truncate font-bold text-slate-400 leading-none">
                       {conv.lastMessagePreview || conv.lastMessage}
                     </p>
@@ -362,7 +360,6 @@ const Inbox: React.FC = () => {
         )}
       </div>
 
-      {/* New Message Modal */}
       {isNewMessageModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
           <div className="bg-white w-full max-w-lg rounded-[3rem] shadow-2xl overflow-hidden flex flex-col border border-white/20">

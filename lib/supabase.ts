@@ -51,22 +51,32 @@ export const fetchConversations = async (companyId: string): Promise<Conversatio
   if (error) throw error;
   
   return (data || []).map(c => ({
-    id: String(c.id), // Ensure ID is treated as string (TEXT)
+    id: String(c.id), 
     contactId: c.contact_id,
     lastMessage: c.last_message || '',
-    lastMessagePreview: c.last_message_preview, // New field from advisor
-    timestamp: new Date(c.last_message_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    lastMessagePreview: c.last_message_preview, 
+    last_message_at: c.last_message_at,
+    timestamp: c.last_message_at 
+      ? new Date(c.last_message_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : 'New',
     source: c.source as ConversationSource,
     status: c.status as any,
     urgency: c.urgency as any,
     isStarred: c.is_starred,
     isUnread: c.is_unread,
-    isInternal: c.is_internal,
+    isInternal: c.type === 'internal', // Map advisor's type field
+    type: c.type as 'external' | 'internal', // Advisor recommended
     messages: [] 
   }));
 };
 
 export const createConversation = async (contactId: string, companyId: string, source: ConversationSource = ConversationSource.SMS): Promise<Conversation> => {
+  const now = new Date().toISOString();
+  
+  // Check contact role to determine conversation type
+  const { data: contact } = await supabase.from('contacts').select('role').eq('id', contactId).single();
+  const convType = contact?.role === 'Team Member' ? 'internal' : 'external';
+
   const { data, error } = await supabase
     .from('conversations')
     .insert({
@@ -75,9 +85,10 @@ export const createConversation = async (contactId: string, companyId: string, s
       source: source,
       status: 'ai-active',
       urgency: 'Medium',
+      type: convType, // Advisor recommended column
       last_message: 'Conversation started',
       last_message_preview: 'Conversation started',
-      last_message_at: new Date().toISOString()
+      last_message_at: now
     })
     .select()
     .single();
@@ -89,12 +100,14 @@ export const createConversation = async (contactId: string, companyId: string, s
     contactId: data.contact_id,
     lastMessage: data.last_message,
     lastMessagePreview: data.last_message_preview,
+    last_message_at: data.last_message_at,
     timestamp: 'Just now',
     source: data.source as ConversationSource,
     status: data.status,
     urgency: data.urgency,
     isStarred: data.is_starred,
     isUnread: data.is_unread,
+    type: data.type,
     messages: []
   };
 };
@@ -110,11 +123,13 @@ export const fetchMessages = async (conversationId: string): Promise<Message[]> 
 
   return (data || []).map(m => ({
     id: m.id,
-    sender: m.sender_type as any,
+    sender: (m.sender_type === 'User' ? 'agent' : m.sender_type === 'Contact' ? 'contact' : 'ai') as any,
+    sender_type: m.sender_type,
+    message_type: m.message_type,
     senderId: m.sender_id,
     content: m.content,
     timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    source: m.source as any,
+    source: m.message_type as any,
     status: m.status as any,
     direction: m.direction as 'inbound' | 'outbound',
     twilioSid: m.twilio_sid,
@@ -142,16 +157,19 @@ export const sendMessageToDb = async (msg: Partial<Message>, conversationId: str
     fromPhone = companyRes.data?.agent_phone_1 || '';
   }
 
+  const advisorSenderType = msg.sender === 'agent' ? 'User' : (msg.sender === 'contact' ? 'Contact' : 'System');
+  const now = new Date().toISOString();
+
   const { data, error } = await supabase
     .from('messages')
     .insert({
       conversation_id: conversationId,
       company_id: companyId,
-      sender_type: msg.sender,
+      sender_type: advisorSenderType,
+      message_type: msg.source || 'sms',
       sender_id: msg.senderId,
       content: msg.content,
       direction: 'outbound',
-      source: msg.source,
       status: 'queued'
     })
     .select()
@@ -159,13 +177,12 @@ export const sendMessageToDb = async (msg: Partial<Message>, conversationId: str
 
   if (error) throw error;
 
-  // Also update preview for efficiency
   await supabase
     .from('conversations')
     .update({ 
       last_message: msg.content, 
       last_message_preview: msg.content ? msg.content.substring(0, 100) : '',
-      last_message_at: new Date().toISOString(),
+      last_message_at: now,
       is_unread: false 
     })
     .eq('id', conversationId);
@@ -409,6 +426,7 @@ export const fetchContactsFromSupabase = async (clientId: string) => {
     address: c.address,
     tags: c.tags || [],
     type: c.type as ContactType,
+    role: c.role || 'Homeowner', // Advisor recommended
     pipelineStage: c.pipeline_stage,
     notes: c.notes,
     company: c.company,
@@ -426,6 +444,7 @@ export const syncContactToSupabase = async (contact: Contact, clientId: string) 
     address: contact.address,
     tags: contact.tags,
     type: contact.type,
+    role: contact.role || 'Homeowner', // Advisor recommended
     pipeline_stage: contact.pipelineStage,
     client_id: clientId,
     notes: contact.notes,

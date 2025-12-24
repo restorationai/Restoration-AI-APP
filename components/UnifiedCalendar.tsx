@@ -354,6 +354,7 @@ const UnifiedCalendar: React.FC = () => {
     setIsSaving(true);
     try {
       const fullAddress = `${newContactAddr.street}, ${newContactAddr.city}, ${newContactAddr.state} ${newContactAddr.zip}`;
+      // Fix: Add missing role property to satisfy Contact interface
       const newContact: Contact = {
         id: `con-${Date.now()}`,
         name: newContactForm.name,
@@ -362,6 +363,8 @@ const UnifiedCalendar: React.FC = () => {
         address: fullAddress,
         tags: ['New Lead', 'Manual Entry'],
         type: newContactForm.type,
+        // Add missing role property based on type
+        role: newContactForm.type === ContactType.HOMEOWNER ? 'Homeowner' : 'Partner',
         pipelineStage: 'Inbound',
         lastActivity: 'Just created',
         customFields: {}
@@ -626,7 +629,7 @@ const UnifiedCalendar: React.FC = () => {
             <div className="p-8 space-y-10">
               <div className="space-y-4">
                 <div className="flex justify-between items-start">
-                  <h2 className="text-3xl font-black tracking-tight leading-tight flex-1">{selectedEvent.title}</h2>
+                  <h2 className="text-3xl font-black tracking-tight leading-tight flex-1">{selectedJob.title}</h2>
                   <button 
                     onClick={() => handleEditEvent(selectedEvent)}
                     className="p-3 bg-white/5 border border-white/10 rounded-2xl hover:bg-white/10 transition-all text-slate-300"

@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Search, 
@@ -31,6 +30,8 @@ const US_STATES = [
   "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"
 ];
 
+const CONTACT_ROLES = ["Homeowner", "Team Member", "Partner"];
+
 const Contacts: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeSegment, setActiveSegment] = useState<ContactType | 'All'>('All');
@@ -54,6 +55,7 @@ const Contacts: React.FC = () => {
     email: '',
     company: '',
     type: ContactType.HOMEOWNER,
+    role: 'Homeowner',
     notes: '',
     vipStatus: false,
     tags: []
@@ -142,11 +144,12 @@ const Contacts: React.FC = () => {
       const finalContact: Contact = {
         id: newId,
         name: contactForm.name || 'Unknown',
-        phone: contactForm.phone || '', // lib/supabase.ts will handle E.164 conversion
+        phone: contactForm.phone || '',
         email: contactForm.email || '',
         address: fullAddress,
         company: contactForm.company,
         type: contactForm.type || ContactType.HOMEOWNER,
+        role: contactForm.role || 'Homeowner',
         vipStatus: contactForm.vipStatus || false,
         notes: contactForm.notes || '',
         tags: contactForm.tags || [],
@@ -173,7 +176,7 @@ const Contacts: React.FC = () => {
   };
 
   const resetForm = () => {
-    setContactForm({ name: '', phone: '', email: '', company: '', type: ContactType.HOMEOWNER, notes: '', vipStatus: false, tags: [] });
+    setContactForm({ name: '', phone: '', email: '', company: '', type: ContactType.HOMEOWNER, role: 'Homeowner', notes: '', vipStatus: false, tags: [] });
     setAddrParts({ street: '', city: '', state: 'CA', zip: '' });
   };
 
@@ -205,7 +208,6 @@ const Contacts: React.FC = () => {
 
   return (
     <div className="flex h-full bg-slate-50/50 overflow-hidden text-slate-900">
-      {/* Sidebar Segments */}
       <div className="w-72 border-r border-slate-200 bg-white flex flex-col p-6 z-10 shadow-sm">
         <div className="mb-8">
           <h2 className="text-xl font-black text-slate-800 tracking-tight flex items-center gap-3">
@@ -276,7 +278,6 @@ const Contacts: React.FC = () => {
         </div>
       </div>
 
-      {/* Main Content Pane */}
       <div className="flex-1 flex flex-col overflow-hidden">
         <header className="px-10 py-8 border-b border-slate-200 bg-white flex flex-col lg:flex-row lg:items-center justify-between gap-6 z-10">
           <div>
@@ -332,7 +333,10 @@ const Contacts: React.FC = () => {
                       <div className="flex items-center gap-3 text-slate-500"><MapPin size={16} className="text-slate-300" /><span className="text-xs font-bold truncate">{contact.address.split(',')[0]}</span></div>
                     </div>
                     <div className="pt-6 border-t border-slate-50 flex items-center justify-between">
-                      <div className="flex gap-2"><span className={`px-2.5 py-1 rounded-lg text-[8px] font-black uppercase tracking-widest ${contact.vipStatus ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-500'}`}>{contact.type}</span></div>
+                      <div className="flex gap-2">
+                        <span className={`px-2.5 py-1 rounded-lg text-[8px] font-black uppercase tracking-widest ${contact.vipStatus ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-500'}`}>{contact.type}</span>
+                        {contact.role === 'Team Member' && <span className="px-2.5 py-1 rounded-lg text-[8px] font-black uppercase tracking-widest bg-blue-600 text-white">Staff</span>}
+                      </div>
                       <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
                          <button onClick={(e) => handleToggleVip(contact.id, e)} className={`p-2 rounded-xl transition-all ${contact.vipStatus ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500 hover:bg-amber-50'}`} title="Mark VIP"><Crown size={16} /></button>
                          <button className="p-2 text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"><ExternalLink size={16} /></button>
@@ -357,7 +361,12 @@ const Contacts: React.FC = () => {
                                 </div>
                              </td>
                              <td className="px-8 py-5"><div className="space-y-1"><p className="text-xs font-bold text-slate-700 flex items-center gap-2"><Smartphone size={12} className="text-slate-300" /> {contact.phone}</p><p className="text-xs font-bold text-slate-500 flex items-center gap-2"><Mail size={12} className="text-slate-300" /> {contact.email}</p></div></td>
-                             <td className="px-8 py-5"><span className={`inline-flex px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${contact.vipStatus ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-500'}`}>{contact.type}</span></td>
+                             <td className="px-8 py-5">
+                               <div className="flex flex-col gap-1">
+                                 <span className={`inline-flex px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${contact.vipStatus ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-500'}`}>{contact.type}</span>
+                                 {contact.role === 'Team Member' && <span className="text-[8px] font-black text-blue-600 uppercase tracking-[0.2em] ml-1">Company Staff</span>}
+                               </div>
+                             </td>
                              <td className="px-8 py-5"><p className="text-xs font-bold text-slate-500 truncate max-w-[200px]">{contact.address}</p></td>
                              <td className="px-8 py-5 text-right">
                                 <div className="flex items-center justify-end gap-3 opacity-0 group-hover:opacity-100 transition-all">
@@ -382,7 +391,6 @@ const Contacts: React.FC = () => {
         </div>
       </div>
 
-      {/* Edit/Add Contact Modal */}
       {isAddingContact && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300 overflow-y-auto">
           <div className="bg-white w-full max-w-2xl rounded-[3rem] shadow-2xl overflow-hidden flex flex-col my-auto border border-white/20">
@@ -399,6 +407,23 @@ const Contacts: React.FC = () => {
                   <div className="col-span-2">
                     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Full Name / Display Name <span className="text-red-500">*</span></label>
                     <input type="text" required value={contactForm.name} onChange={e => setContactForm({...contactForm, name: e.target.value})} className="w-full px-6 py-4 bg-white border border-slate-100 rounded-2xl text-sm font-bold shadow-sm focus:ring-4 focus:ring-blue-600/5 transition-all outline-none" placeholder="e.g. John Smith" />
+                  </div>
+
+                  <div className="col-span-2">
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">System Role (Routing Intelligence) <span className="text-red-500">*</span></label>
+                    <div className="flex gap-3">
+                      {CONTACT_ROLES.map(role => (
+                        <button 
+                          key={role}
+                          type="button"
+                          onClick={() => setContactForm({...contactForm, role})}
+                          className={`flex-1 py-3.5 rounded-2xl text-[10px] font-black uppercase border transition-all ${contactForm.role === role ? 'bg-slate-900 text-white border-slate-900 shadow-lg' : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'}`}
+                        >
+                          {role}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-2 text-[9px] font-bold text-slate-400 italic px-1">Choosing 'Team Member' routes messages to the Internal Chat automatically.</p>
                   </div>
 
                   <div>
@@ -430,7 +455,6 @@ const Contacts: React.FC = () => {
                     <input type="text" value={contactForm.company} onChange={e => setContactForm({...contactForm, company: e.target.value})} className="w-full px-6 py-4 bg-white border border-slate-100 rounded-2xl text-sm font-bold shadow-sm focus:ring-4 focus:ring-blue-600/5 transition-all outline-none" placeholder="e.g. State Farm Claims SLO" />
                   </div>
 
-                  {/* Deconstructed Address Grid */}
                   <div className="col-span-2 pt-4">
                     <span className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 px-1 flex items-center gap-2"><MapPin size={12} /> Service Location Details</span>
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
