@@ -30,8 +30,6 @@ const US_STATES = [
   "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"
 ];
 
-const CONTACT_ROLES = ["Homeowner", "Team Member", "Partner"];
-
 const Contacts: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeSegment, setActiveSegment] = useState<ContactType | 'All'>('All');
@@ -55,7 +53,6 @@ const Contacts: React.FC = () => {
     email: '',
     company: '',
     type: ContactType.HOMEOWNER,
-    role: 'Homeowner',
     notes: '',
     vipStatus: false,
     tags: []
@@ -149,7 +146,6 @@ const Contacts: React.FC = () => {
         address: fullAddress,
         company: contactForm.company,
         type: contactForm.type || ContactType.HOMEOWNER,
-        role: contactForm.role || 'Homeowner',
         vipStatus: contactForm.vipStatus || false,
         notes: contactForm.notes || '',
         tags: contactForm.tags || [],
@@ -176,7 +172,7 @@ const Contacts: React.FC = () => {
   };
 
   const resetForm = () => {
-    setContactForm({ name: '', phone: '', email: '', company: '', type: ContactType.HOMEOWNER, role: 'Homeowner', notes: '', vipStatus: false, tags: [] });
+    setContactForm({ name: '', phone: '', email: '', company: '', type: ContactType.HOMEOWNER, notes: '', vipStatus: false, tags: [] });
     setAddrParts({ street: '', city: '', state: 'CA', zip: '' });
   };
 
@@ -225,6 +221,16 @@ const Contacts: React.FC = () => {
             <span className={`px-2 py-0.5 rounded-lg text-[9px] ${activeSegment === 'All' ? 'bg-white/20' : 'bg-slate-100'}`}>{stats.total}</span>
           </button>
           
+          <div className="pt-6 pb-2 px-4"><span className="text-[9px] font-black text-slate-300 uppercase tracking-[0.3em]">Staff & Partners</span></div>
+          
+          <button 
+            onClick={() => setActiveSegment(ContactType.TEAM_MEMBER)}
+            className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl transition-all font-black text-[11px] uppercase tracking-widest ${activeSegment === ContactType.TEAM_MEMBER ? 'bg-blue-900 text-white shadow-xl shadow-blue-900/20' : 'text-slate-500 hover:bg-slate-50'}`}
+          >
+            <div className="flex items-center gap-3"><User size={16} /> Team Members</div>
+            <span className={`px-2 py-0.5 rounded-lg text-[9px] ${activeSegment === ContactType.TEAM_MEMBER ? 'bg-white/20' : 'bg-slate-100'}`}>{stats.counts[ContactType.TEAM_MEMBER] || 0}</span>
+          </button>
+
           <div className="pt-6 pb-2 px-4"><span className="text-[9px] font-black text-slate-300 uppercase tracking-[0.3em]">Client Categories</span></div>
           
           <button 
@@ -243,12 +249,12 @@ const Contacts: React.FC = () => {
             <span className={`px-2 py-0.5 rounded-lg text-[9px] ${activeSegment === ContactType.RENTER ? 'bg-white/20' : 'bg-slate-100'}`}>{stats.counts[ContactType.RENTER] || 0}</span>
           </button>
 
-          <div className="pt-6 pb-2 px-4"><span className="text-[9px] font-black text-slate-300 uppercase tracking-[0.3em]">Professional Partners</span></div>
+          <div className="pt-6 pb-2 px-4"><span className="text-[9px] font-black text-slate-300 uppercase tracking-[0.3em]">Carrier Partners</span></div>
           {[ContactType.REFERRAL_PARTNER, ContactType.PROPERTY_MANAGER, ContactType.INSURANCE_AGENT, ContactType.ADJUSTER, ContactType.TPA].map(type => (
             <button 
               key={type}
               onClick={() => setActiveSegment(type)}
-              className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl transition-all font-black text-[11px] uppercase tracking-widest ${activeSegment === type ? 'bg-blue-900 text-white shadow-xl shadow-blue-900/20' : 'text-slate-500 hover:bg-slate-50'}`}
+              className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl transition-all font-black text-[11px] uppercase tracking-widest ${activeSegment === type ? 'bg-slate-800 text-white shadow-xl shadow-slate-900/20' : 'text-slate-500 hover:bg-slate-50'}`}
             >
               <div className="flex items-center gap-3"><Building2 size={16} /> {type}</div>
               <span className={`px-2 py-0.5 rounded-lg text-[9px] ${activeSegment === type ? 'bg-white/20' : 'bg-slate-100'}`}>{stats.counts[type] || 0}</span>
@@ -334,8 +340,8 @@ const Contacts: React.FC = () => {
                     </div>
                     <div className="pt-6 border-t border-slate-50 flex items-center justify-between">
                       <div className="flex gap-2">
-                        <span className={`px-2.5 py-1 rounded-lg text-[8px] font-black uppercase tracking-widest ${contact.vipStatus ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-500'}`}>{contact.type}</span>
-                        {contact.role === 'Team Member' && <span className="px-2.5 py-1 rounded-lg text-[8px] font-black uppercase tracking-widest bg-blue-600 text-white">Staff</span>}
+                        <span className={`px-2.5 py-1 rounded-lg text-[8px] font-black uppercase tracking-widest ${contact.type === ContactType.TEAM_MEMBER ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}>{contact.type}</span>
+                        {contact.vipStatus && <span className="px-2.5 py-1 rounded-lg text-[8px] font-black uppercase tracking-widest bg-amber-500 text-white">VIP</span>}
                       </div>
                       <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
                          <button onClick={(e) => handleToggleVip(contact.id, e)} className={`p-2 rounded-xl transition-all ${contact.vipStatus ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500 hover:bg-amber-50'}`} title="Mark VIP"><Crown size={16} /></button>
@@ -363,8 +369,7 @@ const Contacts: React.FC = () => {
                              <td className="px-8 py-5"><div className="space-y-1"><p className="text-xs font-bold text-slate-700 flex items-center gap-2"><Smartphone size={12} className="text-slate-300" /> {contact.phone}</p><p className="text-xs font-bold text-slate-500 flex items-center gap-2"><Mail size={12} className="text-slate-300" /> {contact.email}</p></div></td>
                              <td className="px-8 py-5">
                                <div className="flex flex-col gap-1">
-                                 <span className={`inline-flex px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${contact.vipStatus ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-500'}`}>{contact.type}</span>
-                                 {contact.role === 'Team Member' && <span className="text-[8px] font-black text-blue-600 uppercase tracking-[0.2em] ml-1">Company Staff</span>}
+                                 <span className={`inline-flex px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${contact.type === ContactType.TEAM_MEMBER ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}>{contact.type}</span>
                                </div>
                              </td>
                              <td className="px-8 py-5"><p className="text-xs font-bold text-slate-500 truncate max-w-[200px]">{contact.address}</p></td>
@@ -407,23 +412,6 @@ const Contacts: React.FC = () => {
                   <div className="col-span-2">
                     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Full Name / Display Name <span className="text-red-500">*</span></label>
                     <input type="text" required value={contactForm.name} onChange={e => setContactForm({...contactForm, name: e.target.value})} className="w-full px-6 py-4 bg-white border border-slate-100 rounded-2xl text-sm font-bold shadow-sm focus:ring-4 focus:ring-blue-600/5 transition-all outline-none" placeholder="e.g. John Smith" />
-                  </div>
-
-                  <div className="col-span-2">
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">System Role (Routing Intelligence) <span className="text-red-500">*</span></label>
-                    <div className="flex gap-3">
-                      {CONTACT_ROLES.map(role => (
-                        <button 
-                          key={role}
-                          type="button"
-                          onClick={() => setContactForm({...contactForm, role})}
-                          className={`flex-1 py-3.5 rounded-2xl text-[10px] font-black uppercase border transition-all ${contactForm.role === role ? 'bg-slate-900 text-white border-slate-900 shadow-lg' : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'}`}
-                        >
-                          {role}
-                        </button>
-                      ))}
-                    </div>
-                    <p className="mt-2 text-[9px] font-bold text-slate-400 italic px-1">Choosing 'Team Member' routes messages to the Internal Chat automatically.</p>
                   </div>
 
                   <div>
@@ -482,10 +470,11 @@ const Contacts: React.FC = () => {
                   <div className="pt-4 space-y-6 col-span-2">
                      <div className="grid grid-cols-2 gap-6">
                         <div>
-                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Relationship Type</label>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Relationship Type <span className="text-red-500">*</span></label>
                           <select value={contactForm.type} onChange={e => setContactForm({...contactForm, type: e.target.value as ContactType})} className="w-full h-[54px] px-6 py-4 bg-white border border-slate-100 rounded-2xl text-sm font-bold shadow-sm focus:ring-4 focus:ring-blue-600/5 transition-all outline-none cursor-pointer">
                              {Object.values(ContactType).map(t => <option key={t} value={t}>{t}</option>)}
                           </select>
+                          <p className="mt-2 text-[9px] font-bold text-slate-400 italic px-1">'Team Member' routes messages to Internal Chat.</p>
                         </div>
                         <div className="flex items-end">
                           <button type="button" onClick={() => setContactForm({...contactForm, vipStatus: !contactForm.vipStatus})} className={`w-full h-[54px] flex items-center justify-center gap-3 rounded-2xl font-black uppercase text-[10px] tracking-widest transition-all border ${contactForm.vipStatus ? 'bg-amber-500 border-amber-600 text-white shadow-lg' : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'}`}><Crown size={16} /> {contactForm.vipStatus ? 'VIP Partner Active' : 'Mark as VIP Partner'}</button>

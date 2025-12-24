@@ -43,6 +43,7 @@ export enum ContactType {
   ADJUSTER = 'Adjuster',
   TPA = 'TPA',
   VENDOR = 'Vendor',
+  TEAM_MEMBER = 'Team Member',
   OTHER = 'Other'
 }
 
@@ -167,7 +168,6 @@ export interface Contact {
   vipStatus?: boolean;
   tags: string[];
   type: ContactType;
-  role: string; // Advisor recommended: Homeowner, Team Member, Partner
   pipelineStage: string;
   lastActivity: string;
   customFields: Record<string, string>;
@@ -176,8 +176,8 @@ export interface Contact {
 export interface Message {
   id: string;
   sender: 'ai' | 'contact' | 'agent' | 'system';
-  sender_type: string; // From Advisor: Contact, User, or System
-  message_type: string; // From Advisor: sms, email, chat
+  sender_type: string; 
+  message_type: string; 
   senderId?: string; 
   content: string;
   timestamp: string;
@@ -205,7 +205,7 @@ export interface Conversation {
   isUnread: boolean;
   messages: Message[];
   isInternal?: boolean;
-  type: 'external' | 'internal'; // Advisor recommended
+  category: 'company_inbox' | 'internal_chat'; 
 }
 
 export interface DaySchedule {

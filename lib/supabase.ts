@@ -1,3 +1,4 @@
+
 import { createClient } from '@supabase/supabase-js';
 import { Status, InspectionStatus, Contact, ContactType, Job, PipelineStage, Conversation, Message, ConversationSource } from '../types.ts';
 import { toE164, toDisplay } from '../utils/phoneUtils.ts';
@@ -64,8 +65,8 @@ export const fetchConversations = async (companyId: string): Promise<Conversatio
     urgency: c.urgency as any,
     isStarred: c.is_starred,
     isUnread: c.is_unread,
-    isInternal: c.type === 'internal', // Map advisor's type field
-    type: c.type as 'external' | 'internal', // Advisor recommended
+    isInternal: c.category === 'internal_chat',
+    category: c.category as 'company_inbox' | 'internal_chat',
     messages: [] 
   }));
 };
@@ -73,9 +74,9 @@ export const fetchConversations = async (companyId: string): Promise<Conversatio
 export const createConversation = async (contactId: string, companyId: string, source: ConversationSource = ConversationSource.SMS): Promise<Conversation> => {
   const now = new Date().toISOString();
   
-  // Check contact role to determine conversation type
-  const { data: contact } = await supabase.from('contacts').select('role').eq('id', contactId).single();
-  const convType = contact?.role === 'Team Member' ? 'internal' : 'external';
+  // Determine category based on contact type
+  const { data: contact } = await supabase.from('contacts').select('type').eq('id', contactId).single();
+  const category = contact?.type === ContactType.TEAM_MEMBER ? 'internal_chat' : 'company_inbox';
 
   const { data, error } = await supabase
     .from('conversations')
@@ -85,7 +86,7 @@ export const createConversation = async (contactId: string, companyId: string, s
       source: source,
       status: 'ai-active',
       urgency: 'Medium',
-      type: convType, // Advisor recommended column
+      category: category,
       last_message: 'Conversation started',
       last_message_preview: 'Conversation started',
       last_message_at: now
@@ -107,7 +108,7 @@ export const createConversation = async (contactId: string, companyId: string, s
     urgency: data.urgency,
     isStarred: data.is_starred,
     isUnread: data.is_unread,
-    type: data.type,
+    category: data.category,
     messages: []
   };
 };
@@ -297,7 +298,7 @@ export const syncCompanySettingsToSupabase = async (companyData: any) => {
       default_inspection_duration: companyData.defaultInspectionDuration,
       appointment_buffer_time: companyData.appointmentBufferTime,
       status: companyData.status,
-      twilio_subaccount_sid: companyData.twilioSubaccountSid,
+      twilio_subaccount_sid: companyData.twilio_subaccount_sid,
       stripe_customer_id: companyData.stripeCustomerId
     }, { onConflict: 'id' })
     .select();
@@ -387,11 +388,11 @@ export const fetchCalendarEvents = async (clientId: string) => {
     title: event.title,
     startTime: event.start_time,
     endTime: event.end_time,
-    contactId: event.contact_id,
+    contact_id: event.contact_id,
     assignedTechnicianIds: event.assigned_technician_ids || [],
     status: event.status,
     location: event.location,
-    lossType: event.loss_type,
+    loss_type: event.loss_type,
     description: event.description
   }));
 };
@@ -407,7 +408,7 @@ export const syncCalendarEventToSupabase = async (event: any, clientId: string) 
     assigned_technician_ids: event.assignedTechnicianIds,
     status: event.status,
     location: event.location,
-    loss_type: event.lossType,
+    loss_type: event.loss_type,
     description: event.description,
     client_id: clientId
   }).select();
@@ -426,7 +427,6 @@ export const fetchContactsFromSupabase = async (clientId: string) => {
     address: c.address,
     tags: c.tags || [],
     type: c.type as ContactType,
-    role: c.role || 'Homeowner', // Advisor recommended
     pipelineStage: c.pipeline_stage,
     notes: c.notes,
     company: c.company,
@@ -444,7 +444,6 @@ export const syncContactToSupabase = async (contact: Contact, clientId: string) 
     address: contact.address,
     tags: contact.tags,
     type: contact.type,
-    role: contact.role || 'Homeowner', // Advisor recommended
     pipeline_stage: contact.pipelineStage,
     client_id: clientId,
     notes: contact.notes,
@@ -484,6 +483,7 @@ export const syncJobToSupabase = async (job: Job, clientId: string) => {
     contact_id: job.contactId,
     title: job.title,
     stage: job.stage,
+    // Fix: correct property reference from job.loss_type to job.lossType
     loss_type: job.lossType,
     urgency: job.urgency,
     estimated_value: job.estimatedValue,

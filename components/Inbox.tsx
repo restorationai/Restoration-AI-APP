@@ -144,7 +144,7 @@ const Inbox: React.FC = () => {
           urgency: nc.urgency as any,
           isStarred: nc.is_starred,
           isUnread: nc.is_unread,
-          type: nc.type as 'external' | 'internal',
+          category: nc.category as 'company_inbox' | 'internal_chat',
           messages: []
         }, ...prev]);
       })
@@ -163,9 +163,9 @@ const Inbox: React.FC = () => {
   }, [selectedConvId]);
 
   const filteredConversations = conversations.filter(c => {
-    // Advisor Recommended Logic: Separation based on 'type' column
-    if (activeSection === 'internal-chat' && c.type !== 'internal') return false;
-    if (activeSection === 'inbox' && c.type === 'internal') return false;
+    // Separation based on 'category' column
+    if (activeSection === 'internal-chat' && c.category !== 'internal_chat') return false;
+    if (activeSection === 'inbox' && c.category !== 'company_inbox') return false;
     
     if (activeFilter === 'unread') return c.isUnread;
     if (activeFilter === 'starred') return c.isStarred;
@@ -185,7 +185,7 @@ const Inbox: React.FC = () => {
       sender: 'agent' as const,
       senderId: currentUserId || 'tm1',
       content: composerText,
-      source: (selectedChannel.toLowerCase() === 'chat' ? (selectedConv?.type === 'internal' ? ConversationSource.INTERNAL : ConversationSource.CHAT) : selectedChannel.toLowerCase()) as ConversationSource
+      source: (selectedChannel.toLowerCase() === 'chat' ? (selectedConv?.category === 'internal_chat' ? ConversationSource.INTERNAL : ConversationSource.CHAT) : selectedChannel.toLowerCase()) as ConversationSource
     };
     try {
       await sendMessageToDb(msgPayload, selectedConvId, companyId);

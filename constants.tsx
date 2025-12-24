@@ -21,7 +21,6 @@ export const MOCK_TEAM: TeamMember[] = [
   { id: 'tm3', name: 'Melia Patterson', email: 'melia@ignitesystems.io', role: 'Support' }
 ];
 
-// Fix: Add missing readings and financials properties to satisfy Job interface
 export const MOCK_JOBS: Job[] = [
   {
     id: 'job1',
@@ -96,8 +95,6 @@ export const MOCK_CONTACTS: Contact[] = [
     id: 'con1',
     name: 'Robert Miller',
     type: ContactType.HOMEOWNER,
-    // Add missing role property to satisfy Contact interface
-    role: 'Homeowner',
     phone: '(805) 555-0122',
     email: 'robert@gmail.com',
     address: '124 Oak Street, San Luis Obispo, CA',
@@ -112,8 +109,6 @@ export const MOCK_CONTACTS: Contact[] = [
     id: 'con2',
     name: 'Amanda Brooks',
     type: ContactType.PROPERTY_MANAGER,
-    // Add missing role property to satisfy Contact interface
-    role: 'Partner',
     company: 'Brooks Realty Group',
     phone: '(760) 231-9981',
     email: 'abrooks@outlook.com',
@@ -129,8 +124,6 @@ export const MOCK_CONTACTS: Contact[] = [
     id: 'con3',
     name: 'David Chen',
     type: ContactType.ADJUSTER,
-    // Add missing role property to satisfy Contact interface
-    role: 'Partner',
     company: 'State Farm Claims',
     phone: '(805) 123-4567',
     email: 'd.chen@statefarm.com',
@@ -155,31 +148,27 @@ export const MOCK_CONVERSATIONS: Conversation[] = [
     urgency: 'High',
     isStarred: true,
     isUnread: true,
-    // Add missing type property to satisfy Conversation interface
-    type: 'external',
+    // Fix: replaced incorrect 'type' property with mandatory 'category' property
+    category: 'company_inbox',
     messages: [
       {
         id: 'm1',
         sender: 'contact',
-        // Add missing properties
         sender_type: 'Contact',
         message_type: 'sms',
         content: 'I have a major leak in my kitchen!',
         timestamp: '10:00 AM',
         source: ConversationSource.SMS,
-        // Added missing required direction property
         direction: 'inbound'
       },
       {
         id: 'm2',
         sender: 'ai',
-        // Add missing properties
         sender_type: 'System',
         message_type: 'sms',
         content: 'I am sorry to hear that. I am sending a technician now.',
         timestamp: '10:02 AM',
         source: ConversationSource.SMS,
-        // Added missing required direction property
         direction: 'outbound'
       }
     ]
