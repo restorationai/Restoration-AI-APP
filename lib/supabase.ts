@@ -1,13 +1,12 @@
-
 import { createClient } from '@supabase/supabase-js';
-import { Status, InspectionStatus, Contact, ContactType, Job, PipelineStage, Conversation, Message, ConversationSource } from '../types.ts';
+import { Status, InspectionStatus, Contact, ContactType, Job, PipelineStage, Conversation, Message, ConversationSource, Role } from '../types.ts';
 import { toE164, toDisplay } from '../utils/phoneUtils.ts';
 
 const SUPABASE_URL = 'https://nyscciinkhlutvqkgyvq.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im55c2NjaWlua2hsdXR2cWtneXZxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYyODMxMzMsImV4cCI6MjA4MTg1OTEzM30.4c3QmNYFZS68y4JLtEKwzVo_nQm3pKzucLOajSVRDOA';
 
-// Provided n8n webhook for Twilio outbound processing
-const N8N_OUTBOUND_WEBHOOK = 'https://restorationai.app.n8n.cloud/webhook/twilio/send-message'; 
+// Centralized Outbound Logic: Master n8n webhook for Twilio processing
+const N8N_MASTER_OUTBOUND_WEBHOOK = 'https://restorationai.app.n8n.cloud/webhook/master-outbound-sms'; 
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -74,9 +73,8 @@ export const fetchConversations = async (companyId: string): Promise<Conversatio
 export const createConversation = async (contactId: string, companyId: string, source: ConversationSource = ConversationSource.SMS): Promise<Conversation> => {
   const now = new Date().toISOString();
   
-  // Determine category based on contact type
   const { data: contact } = await supabase.from('contacts').select('type').eq('id', contactId).single();
-  const category = contact?.type === ContactType.TEAM_MEMBER ? 'internal_chat' : 'company_inbox';
+  const category = contact?.type === ContactType.STAFF ? 'internal_chat' : 'company_inbox';
 
   const { data, error } = await supabase
     .from('conversations')
@@ -124,91 +122,80 @@ export const fetchMessages = async (conversationId: string): Promise<Message[]> 
 
   return (data || []).map(m => ({
     id: m.id,
-    sender: (m.sender_type === 'User' ? 'agent' : m.sender_type === 'Contact' ? 'contact' : 'ai') as any,
+    sender: (m.sender_type.toLowerCase() === 'user' ? 'agent' : 
+             m.sender_type.toLowerCase() === 'contact' ? 'contact' : 
+             m.sender_type.toLowerCase() === 'ai' ? 'ai' : 'system') as any,
     sender_type: m.sender_type,
     message_type: m.message_type,
     senderId: m.sender_id,
     content: m.content,
     timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    source: m.message_type as any,
+    source: m.source as any,
     status: m.status as any,
     direction: m.direction as 'inbound' | 'outbound',
-    twilioSid: m.twilio_sid,
-    mediaUrls: m.media_urls,
+    twilioSid: m.twilio_sid || m.external_id,
+    mediaUrls: m.media_urls || [],
     errorMessage: m.error_message
   }));
 };
 
+/**
+ * sendMessageToDb Refactor:
+ * Now purely triggers the n8n Master Webhook. 
+ * n8n handles the Supabase INSERT to capture Twilio SIDs and avoid double-logging.
+ */
 export const sendMessageToDb = async (msg: Partial<Message>, conversationId: string, companyId: string) => {
+  // 1. Resolve Routing Details (To/From numbers)
   const { data: convData } = await supabase
     .from('conversations')
-    .select('contact_id, company_id')
+    .select('contact_id, company_id, source')
     .eq('id', conversationId)
     .single();
 
-  let toPhone = '';
-  let fromPhone = '';
+  if (!convData) throw new Error("Conversation sync error: Routing context not found.");
 
-  if (convData) {
-    const [contactRes, companyRes] = await Promise.all([
-      supabase.from('contacts').select('phone').eq('id', convData.contact_id).single(),
-      supabase.from('companies').select('agent_phone_1').eq('id', convData.company_id).single()
-    ]);
-    toPhone = contactRes.data?.phone || '';
-    fromPhone = companyRes.data?.agent_phone_1 || '';
-  }
+  const [contactRes, companyRes] = await Promise.all([
+    supabase.from('contacts').select('phone').eq('id', convData.contact_id).single(),
+    supabase.from('companies').select('agent_phone_1').eq('id', convData.company_id).single()
+  ]);
 
-  const advisorSenderType = msg.sender === 'agent' ? 'User' : (msg.sender === 'contact' ? 'Contact' : 'System');
-  const now = new Date().toISOString();
+  const toPhone = contactRes.data?.phone || '';
+  const fromPhone = companyRes.data?.agent_phone_1 || '';
 
-  const { data, error } = await supabase
-    .from('messages')
-    .insert({
-      conversation_id: conversationId,
-      company_id: companyId,
-      sender_type: advisorSenderType,
-      message_type: msg.source || 'sms',
-      sender_id: msg.senderId,
-      content: msg.content,
-      direction: 'outbound',
-      status: 'queued'
-    })
-    .select()
-    .single();
+  // 2. Classify Sender (Ensure manual staff replies are 'user')
+  const advisorSenderType = msg.sender === 'ai' ? 'ai' : (msg.sender === 'agent' ? 'user' : 'system');
 
-  if (error) throw error;
-
-  await supabase
-    .from('conversations')
-    .update({ 
-      last_message: msg.content, 
-      last_message_preview: msg.content ? msg.content.substring(0, 100) : '',
-      last_message_at: now,
-      is_unread: false 
-    })
-    .eq('id', conversationId);
-
-  if (N8N_OUTBOUND_WEBHOOK && msg.source !== ConversationSource.INTERNAL) {
+  // 3. Trigger Master Outbound Webhook 
+  // We no longer perform a local supabase.insert here to prevent double-logging.
+  if (N8N_MASTER_OUTBOUND_WEBHOOK) {
     try {
-      fetch(N8N_OUTBOUND_WEBHOOK, {
+      const response = await fetch(N8N_MASTER_OUTBOUND_WEBHOOK, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messageId: data.id,
-          companyId,
-          conversationId,
-          content: msg.content,
-          source: msg.source,
+          company_id: companyId,
+          conversation_id: conversationId,
           to: toPhone,
-          from: fromPhone
+          from: fromPhone,
+          message: msg.content || null, // MMS support (content can be null)
+          media_url: msg.mediaUrls && msg.mediaUrls.length > 0 ? msg.mediaUrls[0] : null,
+          sender_type: advisorSenderType,
+          internal_id: `WEB-${Date.now()}` 
         })
       });
-    } catch (e) {
-      console.error("Failed to notify n8n workflow:", e);
+
+      if (!response.ok) {
+        throw new Error(`Master Gateway Offline: ${response.statusText}`);
+      }
+      
+      return { success: true };
+    } catch (e: any) {
+      console.error("Master Webhook Signal Failure:", e);
+      throw e;
     }
   }
 
-  return data;
+  throw new Error("Master Outbound Webhook is not configured.");
 };
 
 /**
@@ -280,7 +267,7 @@ export const syncCompanySettingsToSupabase = async (companyData: any) => {
       name: companyData.name,
       agent_name: companyData.agentName,
       agent_phone_1: toE164(companyData.agentPhone1),
-      dispatch_strategy: companyData.dispatchStrategy,
+      dispatch_strategy: companyData.dispatch_strategy,
       timezone: companyData.timezone,
       notification_preference: companyData.notificationPreference,
       max_lead_techs: companyData.maxLeadTechs,
@@ -329,7 +316,7 @@ export const fetchTechniciansFromSupabase = async (clientId: string) => {
     return {
       id: tech.id,
       name: tech.name,
-      role: tech.role,
+      role: tech.role as Role,
       phone: toDisplay(tech.phone),
       email: tech.email || '',
       clientId: tech.client_id,
@@ -427,6 +414,7 @@ export const fetchContactsFromSupabase = async (clientId: string) => {
     address: c.address,
     tags: c.tags || [],
     type: c.type as ContactType,
+    role: c.role as Role,
     pipelineStage: c.pipeline_stage,
     notes: c.notes,
     company: c.company,
@@ -444,6 +432,7 @@ export const syncContactToSupabase = async (contact: Contact, clientId: string) 
     address: contact.address,
     tags: contact.tags,
     type: contact.type,
+    role: contact.role,
     pipeline_stage: contact.pipelineStage,
     client_id: clientId,
     notes: contact.notes,
@@ -483,7 +472,6 @@ export const syncJobToSupabase = async (job: Job, clientId: string) => {
     contact_id: job.contactId,
     title: job.title,
     stage: job.stage,
-    // Fix: correct property reference from job.loss_type to job.lossType
     loss_type: job.lossType,
     urgency: job.urgency,
     estimated_value: job.estimatedValue,

@@ -1,6 +1,9 @@
 export enum Role {
   LEAD = 'Lead',
-  ASSISTANT = 'Assistant'
+  ASSISTANT = 'Assistant',
+  OWNER = 'Owner',
+  MANAGER = 'Manager',
+  SUPPORT = 'Support/Admin'
 }
 
 export enum Status {
@@ -35,6 +38,7 @@ export enum ConversationSource {
 }
 
 export enum ContactType {
+  // External
   HOMEOWNER = 'Homeowner',
   RENTER = 'Renter/Tenant',
   REFERRAL_PARTNER = 'Referral Partner',
@@ -43,8 +47,9 @@ export enum ContactType {
   ADJUSTER = 'Adjuster',
   TPA = 'TPA',
   VENDOR = 'Vendor',
-  TEAM_MEMBER = 'Team Member',
-  OTHER = 'Other'
+  OTHER = 'Other',
+  // Internal
+  STAFF = 'Internal Staff'
 }
 
 export type AppointmentType = 'emergency' | 'inspection';
@@ -168,6 +173,7 @@ export interface Contact {
   vipStatus?: boolean;
   tags: string[];
   type: ContactType;
+  role?: Role; 
   pipelineStage: string;
   lastActivity: string;
   customFields: Record<string, string>;

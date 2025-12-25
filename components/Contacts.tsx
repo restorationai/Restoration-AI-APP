@@ -20,9 +20,13 @@ import {
   ShieldCheck,
   MoreHorizontal,
   Home,
-  User
+  User,
+  UserCheck,
+  Zap,
+  Shield,
+  Star
 } from 'lucide-react';
-import { Contact, ContactType } from '../types';
+import { Contact, ContactType, Role } from '../types';
 import { syncContactToSupabase, fetchContactsFromSupabase } from '../lib/supabase';
 import { formatPhoneNumberInput } from '../utils/phoneUtils.ts';
 
@@ -32,7 +36,7 @@ const US_STATES = [
 
 const Contacts: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeSegment, setActiveSegment] = useState<ContactType | 'All'>('All');
+  const [activeSegment, setActiveSegment] = useState<ContactType | Role | 'All'>('All');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -53,6 +57,7 @@ const Contacts: React.FC = () => {
     email: '',
     company: '',
     type: ContactType.HOMEOWNER,
+    role: undefined,
     notes: '',
     vipStatus: false,
     tags: []
@@ -93,7 +98,12 @@ const Contacts: React.FC = () => {
         c.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
         c.phone.includes(searchTerm);
       
-      const matchesSegment = activeSegment === 'All' || c.type === activeSegment;
+      let matchesSegment = activeSegment === 'All';
+      if (!matchesSegment) {
+        if (activeSegment === ContactType.STAFF) matchesSegment = c.type === ContactType.STAFF;
+        else if (Object.values(Role).includes(activeSegment as Role)) matchesSegment = c.role === activeSegment;
+        else matchesSegment = c.type === activeSegment;
+      }
       
       return matchesSearch && matchesSegment;
     });
@@ -102,15 +112,14 @@ const Contacts: React.FC = () => {
   const stats = useMemo(() => {
     const counts = contacts.reduce((acc, c) => {
       acc[c.type] = (acc[c.type] || 0) + 1;
+      if (c.role) acc[c.role] = (acc[c.role] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
 
     return {
       total: contacts.length,
       vips: contacts.filter(c => c.vipStatus).length,
-      counts,
-      partnersTotal: contacts.filter(c => c.type === ContactType.REFERRAL_PARTNER || c.type === ContactType.PROPERTY_MANAGER).length,
-      carriersTotal: contacts.filter(c => c.type === ContactType.INSURANCE_AGENT || c.type === ContactType.ADJUSTER || c.type === ContactType.TPA).length
+      counts
     };
   }, [contacts]);
 
@@ -146,6 +155,7 @@ const Contacts: React.FC = () => {
         address: fullAddress,
         company: contactForm.company,
         type: contactForm.type || ContactType.HOMEOWNER,
+        role: contactForm.type === ContactType.STAFF ? (contactForm.role || Role.SUPPORT) : undefined,
         vipStatus: contactForm.vipStatus || false,
         notes: contactForm.notes || '',
         tags: contactForm.tags || [],
@@ -172,8 +182,16 @@ const Contacts: React.FC = () => {
   };
 
   const resetForm = () => {
-    setContactForm({ name: '', phone: '', email: '', company: '', type: ContactType.HOMEOWNER, notes: '', vipStatus: false, tags: [] });
+    setContactForm({ name: '', phone: '', email: '', company: '', type: ContactType.HOMEOWNER, role: undefined, notes: '', vipStatus: false, tags: [] });
     setAddrParts({ street: '', city: '', state: 'CA', zip: '' });
+  };
+
+  const handleOpenAddForm = (isStaff: boolean = false) => {
+    resetForm();
+    if (isStaff) {
+      setContactForm(prev => ({ ...prev, type: ContactType.STAFF, role: Role.MANAGER }));
+    }
+    setIsAddingContact(true);
   };
 
   const openEdit = (contact: Contact) => {
@@ -221,15 +239,26 @@ const Contacts: React.FC = () => {
             <span className={`px-2 py-0.5 rounded-lg text-[9px] ${activeSegment === 'All' ? 'bg-white/20' : 'bg-slate-100'}`}>{stats.total}</span>
           </button>
           
-          <div className="pt-6 pb-2 px-4"><span className="text-[9px] font-black text-slate-300 uppercase tracking-[0.3em]">Staff & Partners</span></div>
+          <div className="pt-6 pb-2 px-4"><span className="text-[9px] font-black text-slate-300 uppercase tracking-[0.3em]">Internal Team</span></div>
           
           <button 
-            onClick={() => setActiveSegment(ContactType.TEAM_MEMBER)}
-            className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl transition-all font-black text-[11px] uppercase tracking-widest ${activeSegment === ContactType.TEAM_MEMBER ? 'bg-blue-900 text-white shadow-xl shadow-blue-900/20' : 'text-slate-500 hover:bg-slate-50'}`}
+            onClick={() => setActiveSegment(ContactType.STAFF)}
+            className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl transition-all font-black text-[11px] uppercase tracking-widest ${activeSegment === ContactType.STAFF ? 'bg-blue-900 text-white shadow-xl shadow-blue-900/20' : 'text-slate-500 hover:bg-slate-50'}`}
           >
-            <div className="flex items-center gap-3"><User size={16} /> Team Members</div>
-            <span className={`px-2 py-0.5 rounded-lg text-[9px] ${activeSegment === ContactType.TEAM_MEMBER ? 'bg-white/20' : 'bg-slate-100'}`}>{stats.counts[ContactType.TEAM_MEMBER] || 0}</span>
+            <div className="flex items-center gap-3"><Shield size={16} /> Entire Staff</div>
+            <span className={`px-2 py-0.5 rounded-lg text-[9px] ${activeSegment === ContactType.STAFF ? 'bg-white/20' : 'bg-slate-100'}`}>{stats.counts[ContactType.STAFF] || 0}</span>
           </button>
+
+          {Object.values(Role).map(role => (
+            <button 
+              key={role}
+              onClick={() => setActiveSegment(role)}
+              className={`w-full flex items-center justify-between px-4 py-2 ml-2 rounded-xl transition-all font-black text-[10px] uppercase tracking-widest ${activeSegment === role ? 'text-blue-600 bg-blue-50' : 'text-slate-400 hover:bg-slate-50'}`}
+            >
+              <div className="flex items-center gap-3"><div className={`w-1.5 h-1.5 rounded-full ${activeSegment === role ? 'bg-blue-600' : 'bg-slate-200'}`}></div> {role}</div>
+              <span className="text-[9px] opacity-60">{stats.counts[role] || 0}</span>
+            </button>
+          ))}
 
           <div className="pt-6 pb-2 px-4"><span className="text-[9px] font-black text-slate-300 uppercase tracking-[0.3em]">Client Categories</span></div>
           
@@ -261,27 +290,6 @@ const Contacts: React.FC = () => {
             </button>
           ))}
         </div>
-
-        <div className="mt-auto pt-6 border-t border-slate-100 space-y-3">
-           <div className="bg-slate-50 rounded-3xl p-5 border border-slate-100 flex items-center justify-between group cursor-default">
-              <div>
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">VIP Partners</span>
-                <p className="text-2xl font-black text-slate-800">{stats.vips}</p>
-              </div>
-              <div className="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center text-amber-500 border border-amber-100 group-hover:scale-110 transition-transform">
-                <Crown size={20} />
-              </div>
-           </div>
-           <div className="bg-slate-50 rounded-3xl p-5 border border-slate-100 flex items-center justify-between group cursor-default">
-              <div>
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">Carrier Network</span>
-                <p className="text-2xl font-black text-slate-800">{stats.carriersTotal}</p>
-              </div>
-              <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600 border border-blue-100 group-hover:scale-110 transition-transform">
-                <ShieldCheck size={20} />
-              </div>
-           </div>
-        </div>
       </div>
 
       <div className="flex-1 flex flex-col overflow-hidden">
@@ -290,7 +298,7 @@ const Contacts: React.FC = () => {
             <h2 className="text-3xl font-black text-slate-800 tracking-tight leading-none mb-2">
               {activeSegment === 'All' ? 'Full Directory' : activeSegment}
             </h2>
-            <p className="text-sm font-bold text-slate-400">Total {filteredContacts.length} identified contacts in this segment.</p>
+            <p className="text-sm font-bold text-slate-400">Total {filteredContacts.length} records in this segment.</p>
           </div>
           
           <div className="flex items-center gap-6">
@@ -310,12 +318,21 @@ const Contacts: React.FC = () => {
               />
             </div>
             
-            <button 
-              onClick={() => { resetForm(); setIsAddingContact(true); }}
-              className="flex items-center gap-3 px-8 py-4 bg-slate-900 text-white rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-2xl hover:bg-slate-800 transition-all active:scale-95"
-            >
-              <UserPlus size={18} /> New Contact
-            </button>
+            {activeSegment === ContactType.STAFF || Object.values(Role).includes(activeSegment as any) ? (
+              <button 
+                onClick={() => handleOpenAddForm(true)}
+                className="flex items-center gap-3 px-8 py-4 bg-blue-900 text-white rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-2xl hover:bg-slate-800 transition-all active:scale-95"
+              >
+                <UserCheck size={18} /> Onboard Staff
+              </button>
+            ) : (
+              <button 
+                onClick={() => handleOpenAddForm()}
+                className="flex items-center gap-3 px-8 py-4 bg-slate-900 text-white rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-2xl hover:bg-slate-800 transition-all active:scale-95"
+              >
+                <UserPlus size={18} /> New Contact
+              </button>
+            )}
           </div>
         </header>
 
@@ -323,64 +340,71 @@ const Contacts: React.FC = () => {
           {filteredContacts.length > 0 ? (
             viewMode === 'grid' ? (
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
-                {filteredContacts.map((contact) => (
-                  <div key={contact.id} onClick={() => openEdit(contact)} className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm hover:shadow-2xl hover:shadow-slate-200/50 transition-all duration-300 group cursor-pointer relative overflow-hidden">
-                    {contact.vipStatus && <div className="absolute top-0 right-0 p-6"><Crown size={20} className="text-amber-500 fill-amber-500/20" /></div>}
-                    <div className="flex items-start gap-5 mb-8">
-                      <div className={`w-16 h-16 rounded-3xl flex items-center justify-center font-black text-xl shadow-inner border-2 transition-colors ${contact.vipStatus ? 'bg-amber-50 text-amber-600 border-amber-100' : 'bg-slate-50 text-slate-400 border-slate-100 group-hover:bg-blue-50 group-hover:text-blue-600 group-hover:border-blue-100'}`}>{contact.name.split(' ').map(n => n[0]).join('')}</div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="text-xl font-black text-slate-800 tracking-tight truncate group-hover:text-blue-600 transition-colors">{contact.name}</h3>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1 truncate">{contact.company || contact.type}</p>
+                {filteredContacts.map((contact) => {
+                  const isStaff = contact.type === ContactType.STAFF;
+                  return (
+                    <div key={contact.id} onClick={() => openEdit(contact)} className={`bg-white p-8 rounded-[2.5rem] border shadow-sm hover:shadow-2xl hover:shadow-slate-200/50 transition-all duration-300 group cursor-pointer relative overflow-hidden ${isStaff ? 'border-blue-100' : 'border-slate-200'}`}>
+                      {contact.vipStatus && <div className="absolute top-0 right-0 p-6"><Crown size={20} className="text-amber-500 fill-amber-500/20" /></div>}
+                      {isStaff && <div className="absolute -right-4 -top-4 w-16 h-16 bg-blue-600/5 rounded-full flex items-center justify-center p-4"><Shield size={24} className="text-blue-100" /></div>}
+                      <div className="flex items-start gap-5 mb-8">
+                        <div className={`w-16 h-16 rounded-3xl flex items-center justify-center font-black text-xl shadow-inner border-2 transition-colors ${contact.vipStatus ? 'bg-amber-50 text-amber-600 border-amber-100' : isStaff ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-slate-50 text-slate-400 border-slate-100 group-hover:bg-blue-50 group-hover:text-blue-600 group-hover:border-blue-100'}`}>{contact.name.split(' ').map(n => n[0]).join('')}</div>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="text-xl font-black text-slate-800 tracking-tight truncate group-hover:text-blue-600 transition-colors">{contact.name}</h3>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1 truncate">{contact.role || contact.company || contact.type}</p>
+                        </div>
+                      </div>
+                      <div className="space-y-4 mb-8">
+                        <div className="flex items-center gap-3 text-slate-500"><Smartphone size={16} className="text-slate-300" /><span className="text-xs font-bold">{contact.phone}</span></div>
+                        <div className="flex items-center gap-3 text-slate-500"><Mail size={16} className="text-slate-300" /><span className="text-xs font-bold truncate">{contact.email}</span></div>
+                        <div className="flex items-center gap-3 text-slate-500"><MapPin size={16} className="text-slate-300" /><span className="text-xs font-bold truncate">{contact.address.split(',')[0]}</span></div>
+                      </div>
+                      <div className="pt-6 border-t border-slate-50 flex items-center justify-between">
+                        <div className="flex gap-2">
+                          <span className={`px-2.5 py-1 rounded-lg text-[8px] font-black uppercase tracking-widest ${isStaff ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-500'}`}>{isStaff ? contact.role : contact.type}</span>
+                          {contact.vipStatus && <span className="px-2.5 py-1 rounded-lg text-[8px] font-black uppercase tracking-widest bg-amber-500 text-white">VIP</span>}
+                        </div>
+                        <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                           {!isStaff && <button onClick={(e) => handleToggleVip(contact.id, e)} className={`p-2 rounded-xl transition-all ${contact.vipStatus ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500 hover:bg-amber-50'}`} title="Mark VIP"><Crown size={16} /></button>}
+                           <button className="p-2 text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"><ExternalLink size={16} /></button>
+                        </div>
                       </div>
                     </div>
-                    <div className="space-y-4 mb-8">
-                      <div className="flex items-center gap-3 text-slate-500"><Smartphone size={16} className="text-slate-300" /><span className="text-xs font-bold">{contact.phone}</span></div>
-                      <div className="flex items-center gap-3 text-slate-500"><Mail size={16} className="text-slate-300" /><span className="text-xs font-bold truncate">{contact.email}</span></div>
-                      <div className="flex items-center gap-3 text-slate-500"><MapPin size={16} className="text-slate-300" /><span className="text-xs font-bold truncate">{contact.address.split(',')[0]}</span></div>
-                    </div>
-                    <div className="pt-6 border-t border-slate-50 flex items-center justify-between">
-                      <div className="flex gap-2">
-                        <span className={`px-2.5 py-1 rounded-lg text-[8px] font-black uppercase tracking-widest ${contact.type === ContactType.TEAM_MEMBER ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}>{contact.type}</span>
-                        {contact.vipStatus && <span className="px-2.5 py-1 rounded-lg text-[8px] font-black uppercase tracking-widest bg-amber-500 text-white">VIP</span>}
-                      </div>
-                      <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
-                         <button onClick={(e) => handleToggleVip(contact.id, e)} className={`p-2 rounded-xl transition-all ${contact.vipStatus ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500 hover:bg-amber-50'}`} title="Mark VIP"><Crown size={16} /></button>
-                         <button className="p-2 text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"><ExternalLink size={16} /></button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-500">
                  <table className="w-full text-left">
                     <thead className="bg-slate-50/50 border-b border-slate-100 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
-                       <tr><th className="px-8 py-5">Full Name / Entity</th><th className="px-8 py-5">Contact Details</th><th className="px-8 py-5">Relationship</th><th className="px-8 py-5">Address</th><th className="px-8 py-5 text-right">Actions</th></tr>
+                       <tr><th className="px-8 py-5">Full Name / Entity</th><th className="px-8 py-5">Contact Details</th><th className="px-8 py-5">Internal Role</th><th className="px-8 py-5">Address</th><th className="px-8 py-5 text-right">Actions</th></tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                       {filteredContacts.map(contact => (
-                          <tr key={contact.id} onClick={() => openEdit(contact)} className="group hover:bg-slate-50/50 cursor-pointer transition-colors">
-                             <td className="px-8 py-5">
-                                <div className="flex items-center gap-4">
-                                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-[10px] shadow-sm border ${contact.vipStatus ? 'bg-amber-50 text-amber-600 border-amber-100' : 'bg-slate-100 text-slate-400 border-slate-200'}`}>{contact.name.split(' ').map(n => n[0]).join('')}</div>
-                                   <div><p className="text-sm font-black text-slate-800 group-hover:text-blue-600 transition-colors">{contact.name}</p><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{contact.company || 'Private Individual'}</p></div>
+                       {filteredContacts.map(contact => {
+                          const isStaff = contact.type === ContactType.STAFF;
+                          return (
+                            <tr key={contact.id} onClick={() => openEdit(contact)} className="group hover:bg-slate-50/50 cursor-pointer transition-colors">
+                              <td className="px-8 py-5">
+                                  <div className="flex items-center gap-4">
+                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-[10px] shadow-sm border ${contact.vipStatus ? 'bg-amber-50 text-amber-600 border-amber-100' : isStaff ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-slate-100 text-slate-400 border-slate-200'}`}>{contact.name.split(' ').map(n => n[0]).join('')}</div>
+                                    <div><p className="text-sm font-black text-slate-800 group-hover:text-blue-600 transition-colors">{contact.name}</p><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{contact.company || (isStaff ? 'Internal Staff' : 'Private Individual')}</p></div>
+                                  </div>
+                              </td>
+                              <td className="px-8 py-5"><div className="space-y-1"><p className="text-xs font-bold text-slate-700 flex items-center gap-2"><Smartphone size={12} className="text-slate-300" /> {contact.phone}</p><p className="text-xs font-bold text-slate-500 flex items-center gap-2"><Mail size={12} className="text-slate-300" /> {contact.email}</p></div></td>
+                              <td className="px-8 py-5">
+                                <div className="flex flex-col gap-1">
+                                  <span className={`inline-flex px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${isStaff ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-500'}`}>{isStaff ? contact.role : contact.type}</span>
                                 </div>
-                             </td>
-                             <td className="px-8 py-5"><div className="space-y-1"><p className="text-xs font-bold text-slate-700 flex items-center gap-2"><Smartphone size={12} className="text-slate-300" /> {contact.phone}</p><p className="text-xs font-bold text-slate-500 flex items-center gap-2"><Mail size={12} className="text-slate-300" /> {contact.email}</p></div></td>
-                             <td className="px-8 py-5">
-                               <div className="flex flex-col gap-1">
-                                 <span className={`inline-flex px-2.5 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest ${contact.type === ContactType.TEAM_MEMBER ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}>{contact.type}</span>
-                               </div>
-                             </td>
-                             <td className="px-8 py-5"><p className="text-xs font-bold text-slate-500 truncate max-w-[200px]">{contact.address}</p></td>
-                             <td className="px-8 py-5 text-right">
-                                <div className="flex items-center justify-end gap-3 opacity-0 group-hover:opacity-100 transition-all">
-                                   <button onClick={(e) => handleToggleVip(contact.id, e)} className={`p-2 rounded-lg transition-all ${contact.vipStatus ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500 hover:bg-amber-50'}`}><Crown size={16} /></button>
-                                   <button className="p-2 text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded-lg"><MoreHorizontal size={18} /></button>
-                                </div>
-                             </td>
-                          </tr>
-                       ))}
+                              </td>
+                              <td className="px-8 py-5"><p className="text-xs font-bold text-slate-500 truncate max-w-[200px]">{contact.address}</p></td>
+                              <td className="px-8 py-5 text-right">
+                                  <div className="flex items-center justify-end gap-3 opacity-0 group-hover:opacity-100 transition-all">
+                                    {!isStaff && <button onClick={(e) => handleToggleVip(contact.id, e)} className={`p-2 rounded-lg transition-all ${contact.vipStatus ? 'text-amber-500 bg-amber-50' : 'text-slate-300 hover:text-amber-500 hover:bg-amber-50'}`}><Crown size={16} /></button>}
+                                    <button className="p-2 text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded-lg"><MoreHorizontal size={18} /></button>
+                                  </div>
+                              </td>
+                            </tr>
+                          );
+                       })}
                     </tbody>
                  </table>
               </div>
@@ -401,8 +425,15 @@ const Contacts: React.FC = () => {
           <div className="bg-white w-full max-w-2xl rounded-[3rem] shadow-2xl overflow-hidden flex flex-col my-auto border border-white/20">
             <div className="px-10 py-8 bg-slate-900 text-white flex justify-between items-center">
               <div className="flex items-center gap-6">
-                <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center font-black text-2xl shadow-xl shadow-blue-600/20">{contactForm.name ? contactForm.name.split(' ').map(n => n[0]).join('') : <UserPlus size={32} />}</div>
-                <div><h3 className="text-2xl font-black uppercase tracking-tight leading-none mb-1">{contactForm.id ? 'Edit Contact' : 'New CRM Record'}</h3><p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Phase 1: Permanent Identification</p></div>
+                <div className={`w-16 h-16 rounded-2xl flex items-center justify-center font-black text-2xl shadow-xl ${contactForm.type === ContactType.STAFF ? 'bg-blue-900' : 'bg-blue-600'}`}>{contactForm.name ? contactForm.name.split(' ').map(n => n[0]).join('') : <UserPlus size={32} />}</div>
+                <div>
+                  <h3 className="text-2xl font-black uppercase tracking-tight leading-none mb-1">
+                    {contactForm.id ? 'Edit Record' : (contactForm.type === ContactType.STAFF ? 'Onboard Team Member' : 'New CRM Record')}
+                  </h3>
+                  <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">
+                    {contactForm.type === ContactType.STAFF ? 'Master Staff Directory' : 'Phase 1: Identification'}
+                  </p>
+                </div>
               </div>
               <button onClick={() => setIsAddingContact(false)} className="p-3 hover:bg-white/10 rounded-full transition-colors"><X size={32} /></button>
             </div>
@@ -439,12 +470,12 @@ const Contacts: React.FC = () => {
                   </div>
 
                   <div className="col-span-2">
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Associated Company / Branch</label>
-                    <input type="text" value={contactForm.company} onChange={e => setContactForm({...contactForm, company: e.target.value})} className="w-full px-6 py-4 bg-white border border-slate-100 rounded-2xl text-sm font-bold shadow-sm focus:ring-4 focus:ring-blue-600/5 transition-all outline-none" placeholder="e.g. State Farm Claims SLO" />
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Company / Department Name</label>
+                    <input type="text" value={contactForm.company} onChange={e => setContactForm({...contactForm, company: e.target.value})} className="w-full px-6 py-4 bg-white border border-slate-100 rounded-2xl text-sm font-bold shadow-sm focus:ring-4 focus:ring-blue-600/5 transition-all outline-none" placeholder={contactForm.type === ContactType.STAFF ? "e.g. Executive, Operations, Sales" : "e.g. State Farm Claims SLO"} />
                   </div>
 
                   <div className="col-span-2 pt-4">
-                    <span className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 px-1 flex items-center gap-2"><MapPin size={12} /> Service Location Details</span>
+                    <span className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 px-1 flex items-center gap-2"><MapPin size={12} /> {contactForm.type === ContactType.STAFF ? 'Official Mailing Address' : 'Service Location Details'}</span>
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                        <div className="col-span-1 md:col-span-4">
                           <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 ml-1">Street Address</label>
@@ -474,15 +505,23 @@ const Contacts: React.FC = () => {
                           <select value={contactForm.type} onChange={e => setContactForm({...contactForm, type: e.target.value as ContactType})} className="w-full h-[54px] px-6 py-4 bg-white border border-slate-100 rounded-2xl text-sm font-bold shadow-sm focus:ring-4 focus:ring-blue-600/5 transition-all outline-none cursor-pointer">
                              {Object.values(ContactType).map(t => <option key={t} value={t}>{t}</option>)}
                           </select>
-                          <p className="mt-2 text-[9px] font-bold text-slate-400 italic px-1">'Team Member' routes messages to Internal Chat.</p>
                         </div>
-                        <div className="flex items-end">
-                          <button type="button" onClick={() => setContactForm({...contactForm, vipStatus: !contactForm.vipStatus})} className={`w-full h-[54px] flex items-center justify-center gap-3 rounded-2xl font-black uppercase text-[10px] tracking-widest transition-all border ${contactForm.vipStatus ? 'bg-amber-500 border-amber-600 text-white shadow-lg' : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'}`}><Crown size={16} /> {contactForm.vipStatus ? 'VIP Partner Active' : 'Mark as VIP Partner'}</button>
-                        </div>
+                        {contactForm.type === ContactType.STAFF ? (
+                          <div>
+                            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Internal Staff Role <span className="text-red-500">*</span></label>
+                            <select value={contactForm.role} onChange={e => setContactForm({...contactForm, role: e.target.value as Role})} className="w-full h-[54px] px-6 py-4 bg-white border border-slate-100 rounded-2xl text-sm font-bold shadow-sm focus:ring-4 focus:ring-blue-600/5 transition-all outline-none cursor-pointer">
+                              {Object.values(Role).map(r => <option key={r} value={r}>{r}</option>)}
+                            </select>
+                          </div>
+                        ) : (
+                          <div className="flex items-end">
+                            <button type="button" onClick={() => setContactForm({...contactForm, vipStatus: !contactForm.vipStatus})} className={`w-full h-[54px] flex items-center justify-center gap-3 rounded-2xl font-black uppercase text-[10px] tracking-widest transition-all border ${contactForm.vipStatus ? 'bg-amber-500 border-amber-600 text-white shadow-lg' : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'}`}><Crown size={16} /> {contactForm.vipStatus ? 'VIP Partner Active' : 'Mark as VIP Partner'}</button>
+                          </div>
+                        )}
                      </div>
 
                      <div>
-                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Permanent CRM Notes</label>
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">{contactForm.type === ContactType.STAFF ? 'Internal Staff Background Notes' : 'Permanent CRM Notes'}</label>
                         <textarea value={contactForm.notes} onChange={e => setContactForm({...contactForm, notes: e.target.value})} rows={3} className="w-full px-6 py-4 bg-white border border-slate-100 rounded-[2rem] text-sm font-bold shadow-sm focus:ring-4 focus:ring-blue-600/5 transition-all outline-none resize-none" placeholder="Add specific background info on this contact..." />
                      </div>
                   </div>
@@ -492,10 +531,10 @@ const Contacts: React.FC = () => {
                   <button 
                     type="submit" 
                     disabled={isSaving || !contactForm.name || !contactForm.phone || !contactForm.email || !addrParts.street}
-                    className="flex-[2] py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl shadow-blue-600/30 hover:bg-blue-700 transition-all flex items-center gap-3 active:scale-95 disabled:opacity-50"
+                    className={`flex-[2] py-4 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl transition-all flex items-center justify-center gap-3 active:scale-95 disabled:opacity-50 ${contactForm.type === ContactType.STAFF ? 'bg-blue-900 text-white shadow-blue-900/20 hover:bg-black' : 'bg-blue-600 text-white shadow-blue-600/30 hover:bg-blue-700'}`}
                   >
                     {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                    {isSaving ? 'Saving...' : 'Sync to CRM'}
+                    {isSaving ? 'Saving...' : (contactForm.type === ContactType.STAFF ? 'Save Team Member' : 'Sync to CRM')}
                   </button>
                </div>
             </form>
