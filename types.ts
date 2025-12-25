@@ -1,3 +1,4 @@
+
 export enum Role {
   LEAD = 'Lead',
   ASSISTANT = 'Assistant',
@@ -54,6 +55,7 @@ export enum ContactType {
 
 export type AppointmentType = 'emergency' | 'inspection';
 
+// Fix: Use union operator (|) instead of commas for type definition to prevent cascading type errors
 export type PipelineStage = 'Inbound' | 'Dispatching' | 'In Progress' | 'Completion' | 'Invoiced';
 
 export interface GHLCustomFields {
@@ -119,8 +121,10 @@ export interface JobDocument {
 export interface Job {
   id: string;
   contactId: string;
+  propertyManagerId?: string; // Linked Property Manager/Partner
   title: string;
   stage: PipelineStage;
+  status: 'Open' | 'Closed';
   lossType: string;
   assignedTechIds: string[];
   urgency: 'Low' | 'Medium' | 'High';
@@ -140,6 +144,7 @@ export interface CalendarEvent {
   startTime: string; 
   endTime: string;   
   contactId: string;
+  jobId?: string; // Linked Job ID
   assignedTechnicianIds: string[];
   status: 'pending' | 'confirmed' | 'dispatched' | 'completed' | 'cancelled';
   location: string;
@@ -164,10 +169,17 @@ export interface CustomField {
 
 export interface Contact {
   id: string;
-  name: string;
+  name: string; // Full name (usually computed/concatenated)
+  firstName?: string;
+  lastName?: string;
   phone: string;
   email: string;
-  address: string;
+  address: string; // Legacy full string
+  street?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+  country?: string;
   company?: string;
   notes?: string;
   vipStatus?: boolean;

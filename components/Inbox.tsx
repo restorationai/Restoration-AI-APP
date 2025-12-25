@@ -111,7 +111,7 @@ const Inbox: React.FC = () => {
     if (!companyId) return;
 
     const channel = supabase
-      .channel(`inbox-sync-v6-${companyId}`)
+      .channel(`inbox-sync-v7-${companyId}`)
       .on('postgres_changes', { 
         event: 'INSERT', 
         schema: 'public', 
@@ -122,9 +122,9 @@ const Inbox: React.FC = () => {
         
         const formatted: Message = {
           id: newMessage.id,
-          sender: (newMessage.sender_type.toLowerCase() === 'user' ? 'agent' : 
-                   newMessage.sender_type.toLowerCase() === 'contact' ? 'contact' : 
-                   newMessage.sender_type.toLowerCase() === 'ai' ? 'ai' : 'system') as any,
+          sender: (newMessage.sender_type?.toLowerCase() === 'user' ? 'agent' : 
+                   newMessage.sender_type?.toLowerCase() === 'contact' ? 'contact' : 
+                   newMessage.sender_type?.toLowerCase() === 'ai' ? 'ai' : 'system') as any,
           sender_type: newMessage.sender_type,
           message_type: newMessage.message_type,
           senderId: newMessage.sender_id,
@@ -284,16 +284,17 @@ const Inbox: React.FC = () => {
           {filteredConversations.length > 0 ? filteredConversations.map((conv) => {
             const contact = contacts.find(c => c.id === conv.contactId);
             const isActive = selectedConvId === conv.id;
+            const displayName = contact?.name || conv.name || 'Unknown Contact';
             return (
               <button key={conv.id} onClick={() => setSelectedConvId(conv.id)} className={`w-full p-6 border-b border-slate-100 text-left transition-all relative group ${isActive ? 'bg-white shadow-inner ring-1 ring-slate-100' : 'hover:bg-white'}`}>
                 {conv.isUnread && <div className="absolute right-6 top-1/2 -translate-y-1/2 w-2.5 h-2.5 bg-blue-600 rounded-full shadow-lg"></div>}
                 <div className="flex items-center gap-4">
                   <div className={`w-14 h-14 rounded-[1.25rem] flex items-center justify-center font-black text-xs uppercase shadow-sm border-2 transition-all ${isActive ? 'bg-blue-600 text-white border-blue-100' : 'bg-slate-100 text-slate-400 border-white'}`}>
-                    {(contact?.name || conv.name || '??').split(' ').map(n => n[0]).join('')}
+                    {displayName.split(' ').map(n => n[0]).join('')}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex justify-between items-center mb-1">
-                      <span className="font-black text-[13px] text-slate-800 truncate">{contact?.name || conv.name || 'Unknown Contact'}</span>
+                      <span className="font-black text-[13px] text-slate-800 truncate">{displayName}</span>
                       <span className="text-[9px] font-black text-slate-300 uppercase whitespace-nowrap">{conv.timestamp}</span>
                     </div>
                     <div className="flex items-center gap-1.5">
@@ -323,7 +324,7 @@ const Inbox: React.FC = () => {
                   {(selectedContact?.name || selectedConv.name || '??').split(' ').map(n => n[0]).join('')}
                 </div>
                 <div>
-                  <h3 className="font-black text-slate-900 text-[15px] tracking-tight">{selectedContact?.name || selectedConv.name}</h3>
+                  <h3 className="font-black text-slate-900 text-[15px] tracking-tight">{selectedContact?.name || selectedConv.name || 'Unknown Contact'}</h3>
                   <div className="flex items-center gap-2 mt-0.5">
                     <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{selectedContact?.phone || 'Outbound Protocol'}</span>
                     <span className="w-1 h-1 bg-slate-200 rounded-full"></span>
@@ -487,14 +488,14 @@ const Inbox: React.FC = () => {
                 </div>
 
                 <div className="max-h-[350px] overflow-y-auto scrollbar-hide space-y-2">
-                  {contacts.filter(c => c.name.toLowerCase().includes(contactSearch.toLowerCase()) || c.phone.includes(contactSearch)).map(contact => (
+                  {contacts.filter(c => (c.name || '').toLowerCase().includes(contactSearch.toLowerCase()) || (c.phone || '').includes(contactSearch)).map(contact => (
                     <button key={contact.id} onClick={() => handleStartNewConversation(contact.id)} className="w-full flex items-center justify-between p-5 rounded-[1.8rem] hover:bg-blue-50 transition-all text-left border border-transparent hover:border-blue-100 group">
                       <div className="flex items-center gap-4">
                         <div className="w-11 h-11 rounded-[1rem] bg-slate-100 group-hover:bg-blue-600 group-hover:text-white transition-all flex items-center justify-center font-black text-[11px] uppercase text-slate-400">
-                          {contact.name.split(' ').map(n => n[0]).join('')}
+                          {(contact.name || '??').split(' ').map(n => n[0]).join('')}
                         </div>
                         <div>
-                          <p className="font-black text-slate-800 text-[14px] leading-none mb-1.5">{contact.name}</p>
+                          <p className="font-black text-slate-800 text-[14px] leading-none mb-1.5">{contact.name || 'Unnamed Contact'}</p>
                           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{contact.phone} • {contact.type}</p>
                         </div>
                       </div>

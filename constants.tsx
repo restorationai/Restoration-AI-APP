@@ -27,6 +27,8 @@ export const MOCK_JOBS: Job[] = [
     contactId: 'con1',
     title: 'Burst Pipe Emergency',
     stage: 'Dispatching',
+    // Added missing 'status' property required by Job type
+    status: 'Open',
     lossType: 'Water Damage',
     assignedTechIds: ['T2'],
     urgency: 'High',
@@ -42,6 +44,8 @@ export const MOCK_JOBS: Job[] = [
     contactId: 'con2',
     title: 'Mold Remediation Inspection',
     stage: 'Inbound',
+    // Added missing 'status' property required by Job type
+    status: 'Open',
     lossType: 'Mold',
     assignedTechIds: [],
     urgency: 'Medium',

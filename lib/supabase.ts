@@ -1,3 +1,4 @@
+
 import { createClient } from '@supabase/supabase-js';
 import { Status, InspectionStatus, Contact, ContactType, Job, PipelineStage, Conversation, Message, ConversationSource, Role } from '../types.ts';
 import { toE164, toDisplay } from '../utils/phoneUtils.ts';
@@ -270,8 +271,8 @@ export const syncCompanySettingsToSupabase = async (companyData: any) => {
       dispatch_strategy: companyData.dispatch_strategy,
       timezone: companyData.timezone,
       notification_preference: companyData.notificationPreference,
-      max_lead_techs: companyData.maxLeadTechs,
-      max_assistant_techs: companyData.maxAssistantTechs,
+      max_lead_techs: companyData.max_lead_techs,
+      max_assistant_techs: companyData.max_assistant_techs,
       management_contacts: ownersE164,
       owner_1_name: primaryRecipient.name,
       owner_1_phone: toE164(primaryRecipient.phone),
@@ -356,7 +357,7 @@ export const syncScheduleToSupabase = async (techId: string, schedule: any[]) =>
     technician_id: techId,
     day_name: s.day,
     is_enabled: s.enabled,
-    is_24h: s.is24Hours || false,
+    is_24h: s.is_24h || false,
     start_time: s.start || null,
     end_time: s.end || null,
     override_status: s.override || 'None'
@@ -375,11 +376,12 @@ export const fetchCalendarEvents = async (clientId: string) => {
     title: event.title,
     startTime: event.start_time,
     endTime: event.end_time,
-    contact_id: event.contact_id,
+    contactId: event.contact_id,
+    jobId: event.job_id,
     assignedTechnicianIds: event.assigned_technician_ids || [],
     status: event.status,
     location: event.location,
-    loss_type: event.loss_type,
+    lossType: event.loss_type,
     description: event.description
   }));
 };
@@ -391,11 +393,13 @@ export const syncCalendarEventToSupabase = async (event: any, clientId: string) 
     title: event.title,
     start_time: event.startTime,
     end_time: event.endTime,
-    contact_id: event.contact_id,
-    assigned_technician_ids: event.assignedTechnicianIds,
+    contact_id: event.contactId,
+    // Fix: Ensure empty jobId is sent as null to satisfy foreign key constraints
+    job_id: event.jobId || null,
+    assigned_technician_ids: event.assigned_technician_ids,
     status: event.status,
     location: event.location,
-    loss_type: event.loss_type,
+    loss_type: event.lossType,
     description: event.description,
     client_id: clientId
   }).select();
@@ -409,9 +413,16 @@ export const fetchContactsFromSupabase = async (clientId: string) => {
   return (data || []).map((c: any) => ({
     id: c.id,
     name: c.name,
+    firstName: c.first_name,
+    lastName: c.last_name,
     phone: toDisplay(c.phone),
     email: c.email,
     address: c.address,
+    street: c.street,
+    city: c.city,
+    state: c.state,
+    postalCode: c.postal_code,
+    country: c.country,
     tags: c.tags || [],
     type: c.type as ContactType,
     role: c.role as Role,
@@ -427,9 +438,16 @@ export const syncContactToSupabase = async (contact: Contact, clientId: string) 
   const { data, error } = await supabase.from('contacts').upsert({
     id: contact.id,
     name: contact.name,
+    first_name: contact.firstName,
+    last_name: contact.lastName,
     phone: toE164(contact.phone),
     email: contact.email,
     address: contact.address,
+    street: contact.street,
+    city: contact.city,
+    state: contact.state,
+    postal_code: contact.postalCode,
+    country: contact.country,
     tags: contact.tags,
     type: contact.type,
     role: contact.role,
@@ -453,15 +471,20 @@ export const fetchJobsFromSupabase = async (clientId: string): Promise<Job[]> =>
   return (data || []).map((j: any) => ({
     id: j.id,
     contactId: j.contact_id,
+    propertyManagerId: j.property_manager_id,
     title: j.title,
     stage: j.stage as PipelineStage,
+    status: j.status as 'Open' | 'Closed', 
     lossType: j.loss_type || 'Other',
     assignedTechIds: j.assigned_tech_ids || [],
     urgency: j.urgency as any || 'Medium',
     estimatedValue: Number(j.estimated_value) || 0,
     timestamp: new Date(j.created_at).toLocaleDateString(),
     customFields: j.custom_fields || {},
-    notes: [], readings: [], financials: [], documents: []
+    notes: j.notes || [], 
+    readings: j.readings || [], 
+    financials: j.financials || [], 
+    documents: j.documents || []
   }));
 };
 
@@ -470,13 +493,16 @@ export const syncJobToSupabase = async (job: Job, clientId: string) => {
     id: job.id,
     client_id: clientId,
     contact_id: job.contactId,
+    property_manager_id: job.propertyManagerId || null,
     title: job.title,
     stage: job.stage,
+    status: job.status, 
     loss_type: job.lossType,
     urgency: job.urgency,
     estimated_value: job.estimatedValue,
     assigned_tech_ids: job.assignedTechIds,
-    custom_fields: job.customFields
+    custom_fields: job.customFields,
+    notes: job.notes 
   }, { onConflict: 'id' }).select();
   if (error) throw new Error(error.message);
   return data;
