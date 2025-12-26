@@ -222,16 +222,33 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
     setLocalOverride(schedule[0]?.override || 'None');
   };
 
-  const handleDeleteTech = async (techId: string) => {
-    if (!window.confirm("Are you sure you want to permanently remove this technician from the roster? This will also delete their weekly availability schedules.")) return;
+  /**
+   * Final optimized delete handler.
+   */
+  const handleDeleteTech = async (e: React.MouseEvent, techId: string) => {
+    e.stopPropagation();
+    
+    // Close the menu immediately to ensure clean UI state
+    setMenuOpenId(null);
+
+    const techName = technicians.find(t => t.id === techId)?.name || "this technician";
+    
+    if (!window.confirm(`PERMANENT ACTION: Are you sure you want to completely remove ${techName} from the dispatch roster? This will also purge their schedules and CRM profile.`)) {
+      return;
+    }
     
     setIsSyncing(true);
     try {
+      // 1. Permanent Removal from Supabase
       await deleteTechnicianFromSupabase(techId);
+      
+      // 2. React state filter to remove from UI
       setTechnicians(prev => prev.filter(t => t.id !== techId));
-      setMenuOpenId(null);
+      
+      console.log(`Success: Technician ${techId} removed from master roster.`);
     } catch (err: any) {
-      alert(`Delete failed: ${err.message}`);
+      console.error("Deletion lifecycle failure:", err);
+      alert(`System Error: ${err.message}`);
     } finally {
       setIsSyncing(false);
     }
@@ -443,7 +460,7 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
                               <CalendarDays size={16} className="text-slate-400" /> Availability
                             </button>
                             <button 
-                              onClick={() => handleDeleteTech(tech.id)}
+                              onClick={(e) => handleDeleteTech(e, tech.id)}
                               className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-600 hover:bg-red-50 transition-all text-[11px] font-black uppercase tracking-widest"
                             >
                               <Trash2 size={16} /> Delete Tech

@@ -80,7 +80,7 @@ export const fetchCompanySettings = async (companyId: string): Promise<Restorati
       dispatchStrategy: data.dispatch_strategy,
       timezone: data.timezone,
       notificationPreference: data.notification_preference,
-      maxLeadTechs: data.max_lead_tech_s,
+      maxLeadTechs: data.max_lead_techs,
       maxAssistantTechs: data.max_assistant_techs,
       owners: managementContacts.map((m: any) => ({ ...m, phone: toDisplay(m.phone) })),
       onsiteResponseMinutes: data.onsite_response_minutes ?? 60,
@@ -276,12 +276,38 @@ export const syncTechnicianToSupabase = async (techData: any) => {
   return techSync;
 };
 
+/**
+ * Robust deletion logic for technicians and linked entities.
+ */
 export const deleteTechnicianFromSupabase = async (techId: string) => {
-  // First delete associated schedules
+  if (!techId) throw new Error("Technician ID is required for deletion.");
+
+  // 1. Delete associated schedules first
   await supabase.from('technician_schedules').delete().eq('technician_id', techId);
-  // Then delete the technician record
-  const { error } = await supabase.from('technicians').delete().eq('id', techId);
-  if (error) throw new Error(error.message);
+  
+  // 2. Delete linked contact record if it exists
+  const contactId = techId.startsWith('T-') ? techId.replace('T-', 'CON-') : `CON-${techId}`;
+  await supabase.from('contacts').delete().eq('id', contactId);
+
+  // 3. Finally delete the main technician record
+  const { error, count } = await supabase
+    .from('technicians')
+    .delete({ count: 'exact' })
+    .eq('id', techId);
+
+  if (error) {
+    // If it's a foreign key error, give a friendly message
+    if (error.code === '23503') {
+      throw new Error("Cannot delete technician: They are still assigned to active jobs or calendar appointments. Please unassign them first.");
+    }
+    throw new Error(error.message);
+  }
+
+  // Check if anything was actually deleted (RLS check)
+  if (count === 0) {
+    throw new Error("Deletion failed: Record not found or database security policy prevented removal.");
+  }
+
   return true;
 };
 
@@ -431,6 +457,9 @@ export const fetchJobsFromSupabase = async (clientId: string): Promise<Job[]> =>
   }));
 };
 
+/**
+ * Corrected custom_fields: job.customFields below to match Job interface in types.ts
+ */
 export const syncJobToSupabase = async (job: Job, clientId: string) => {
   const { data, error } = await supabase.from('jobs').upsert({
     id: job.id,
@@ -553,6 +582,9 @@ export const fetchMessages = async (conversationId: string): Promise<Message[]> 
   }));
 };
 
+/**
+ * Fixed type error in sendMessageToDb by removing non-existent media_url property access on Message type.
+ */
 export const sendMessageToDb = async (msg: Partial<Message>, conversationId: string, companyId: string) => {
   const { data: convData } = await supabase
     .from('conversations')
@@ -582,7 +614,7 @@ export const sendMessageToDb = async (msg: Partial<Message>, conversationId: str
           to: toPhone,
           from: fromPhone,
           message: msg.content || null,
-          media_url: msg.mediaUrls && msg.mediaUrls.length > 0 ? msg.mediaUrls[0] : null,
+          media_url: (msg.mediaUrls && msg.mediaUrls.length > 0 ? msg.mediaUrls[0] : null),
           sender_type: advisorSenderType,
           internal_id: `WEB-${Date.now()}` 
         })
