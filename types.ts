@@ -50,7 +50,7 @@ export enum ContactType {
   VENDOR = 'Vendor',
   OTHER = 'Other',
   // Internal
-  STAFF = 'Internal Staff'
+  STAFF = 'Team Member'
 }
 
 export type AppointmentType = 'emergency' | 'inspection';

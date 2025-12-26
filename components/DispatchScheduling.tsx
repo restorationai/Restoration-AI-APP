@@ -32,11 +32,13 @@ import {
   Mail,
   Bot,
   ChevronUp,
-  ChevronDown
+  ChevronDown,
+  /* Add Info icon import */
+  Info
 } from 'lucide-react';
 import { MOCK_DISPATCH_LOGS, DEFAULT_SCHEDULE } from '../constants.tsx';
 import { Role, Status, InspectionStatus, Technician, DaySchedule, RestorationCompany, Contact, ContactType } from '../types.ts';
-import { syncTechnicianToSupabase, syncScheduleToSupabase, fetchTechniciansFromSupabase, fetchCompanySettings, syncCompanySettingsToSupabase, fetchContactsFromSupabase, syncContactToSupabase } from '../lib/supabase.ts';
+import { syncTechnicianToSupabase, syncScheduleToSupabase, fetchTechniciansFromSupabase, fetchCompanySettings, syncCompanySettingsToSupabase, fetchContactsFromSupabase, syncContactToSupabase, deleteTechnicianFromSupabase } from '../lib/supabase.ts';
 import { formatPhoneNumberInput, toDisplay } from '../utils/phoneUtils.ts';
 
 interface DispatchSchedulingProps {
@@ -70,6 +72,7 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string>('Never');
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   
   const [editingTech, setEditingTech] = useState<Technician | null>(null);
   const [isAddingTech, setIsAddingTech] = useState(false);
@@ -146,7 +149,7 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
         }
         setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
       } catch (err) {
-        console.error("Failed to load techs/config:", err);
+        console.error("Failed to load data:", err);
       } finally {
         setIsLoading(false);
       }
@@ -156,6 +159,15 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
     const timer = setInterval(() => setCurrentTime(new Date()), 60000);
     return () => clearInterval(timer);
   }, []);
+
+  // Close menu on click outside
+  useEffect(() => {
+    const handleClickOutside = () => setMenuOpenId(null);
+    if (menuOpenId) {
+      window.addEventListener('click', handleClickOutside);
+    }
+    return () => window.removeEventListener('click', handleClickOutside);
+  }, [menuOpenId]);
 
   const filteredDirectoryContacts = useMemo(() => {
     if (!directorySearch) return contacts.slice(0, 10);
@@ -210,6 +222,21 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
     setLocalOverride(schedule[0]?.override || 'None');
   };
 
+  const handleDeleteTech = async (techId: string) => {
+    if (!window.confirm("Are you sure you want to permanently remove this technician from the roster? This will also delete their weekly availability schedules.")) return;
+    
+    setIsSyncing(true);
+    try {
+      await deleteTechnicianFromSupabase(techId);
+      setTechnicians(prev => prev.filter(t => t.id !== techId));
+      setMenuOpenId(null);
+    } catch (err: any) {
+      alert(`Delete failed: ${err.message}`);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const handleUpdateProtocol = async () => {
     if (!companyConfig) return;
     setIsSyncing(true);
@@ -222,9 +249,9 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
         transfer_1_name: directory[0].name, transfer_1_phone: directory[0].phone,
         transfer_2_name: directory[1].name, transfer_2_phone: directory[1].phone,
         transfer_3_name: directory[2].name, transfer_3_phone: directory[2].phone,
-        transfer_4_name: directory[3].name, transfer_4_phone: directory[3].phone,
-        transfer_5_name: directory[4].name, transfer_5_phone: directory[4].phone,
-        transfer_6_name: directory[5].name, transfer_6_phone: directory[5].phone,
+        transfer_4_name: directory[4].name, transfer_4_phone: directory[4].phone,
+        transfer_5_name: directory[5].name, transfer_5_phone: directory[5].phone,
+        transfer_6_name: directory[6].name, transfer_6_phone: directory[6].phone,
       };
       await syncCompanySettingsToSupabase(updatedConfig);
       setCompanyConfig(updatedConfig);
@@ -395,7 +422,35 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
                   <td className="px-10 py-6 text-right">
                     <div className="flex items-center justify-end gap-3">
                       <button onClick={() => handleOpenSettings(tech)} className="p-3 bg-white border border-slate-200 text-slate-400 hover:text-blue-600 hover:border-blue-200 hover:bg-blue-50 rounded-xl transition-all shadow-sm"><CalendarDays size={18} /></button>
-                      <button className="p-3 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-all"><MoreVertical size={18} /></button>
+                      
+                      <div className="relative">
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setMenuOpenId(menuOpenId === tech.id ? null : tech.id);
+                          }}
+                          className={`p-3 rounded-xl transition-all ${menuOpenId === tech.id ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-400 hover:text-slate-900 hover:bg-slate-100'}`}
+                        >
+                          <MoreVertical size={18} />
+                        </button>
+                        
+                        {menuOpenId === tech.id && (
+                          <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-2xl shadow-2xl border border-slate-100 z-50 p-2 animate-in zoom-in-95 duration-200 text-left">
+                            <button 
+                              onClick={() => handleOpenSettings(tech)}
+                              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-600 hover:bg-slate-50 transition-all text-[11px] font-black uppercase tracking-widest"
+                            >
+                              <CalendarDays size={16} className="text-slate-400" /> Availability
+                            </button>
+                            <button 
+                              onClick={() => handleDeleteTech(tech.id)}
+                              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-600 hover:bg-red-50 transition-all text-[11px] font-black uppercase tracking-widest"
+                            >
+                              <Trash2 size={16} /> Delete Tech
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </td>
                 </tr>
@@ -440,6 +495,7 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
           <div className="space-y-12 animate-in slide-in-from-bottom-2 duration-500">
             {renderTechTable(technicians.filter(t => t.role === Role.LEAD && (rosterView === 'emergency' ? t.emergencyPriority !== 'None' : t.inspectionPriority !== 'None')), 'Lead Technicians')}
             {renderTechTable(technicians.filter(t => t.role === Role.ASSISTANT && (rosterView === 'emergency' ? t.emergencyPriority !== 'None' : t.inspectionPriority !== 'None')), 'Assistant Technicians')}
+            {renderTechTable(technicians.filter(t => [Role.OWNER, Role.MANAGER, Role.SUPPORT].includes(t.role) && (rosterView === 'emergency' ? t.emergencyPriority !== 'None' : t.inspectionPriority !== 'None')), 'Staff & Management')}
           </div>
         </div>
       )}
@@ -580,7 +636,7 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
               <div className="p-8 bg-slate-900 text-white flex justify-between items-center">
                  <div className="flex items-center gap-4">
                     <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg"><UserPlus size={24} /></div>
-                    <h3 className="text-xl font-black uppercase tracking-tight">Add New Technician</h3>
+                    <h3 className="text-xl font-black uppercase tracking-tight">Onboard Team Member</h3>
                  </div>
                  <button onClick={() => setIsAddingTech(false)} className="p-3 hover:bg-white/10 rounded-full transition-colors"><X size={28} /></button>
               </div>
@@ -588,27 +644,36 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
                 <div className="space-y-4">
                   <div>
                     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Full Name</label>
-                    <input required type="text" placeholder="Technician Name" value={newTechForm.name} onChange={e => setNewTechForm({...newTechForm, name: e.target.value})} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold border-none outline-none focus:ring-4 focus:ring-blue-600/5 transition-all" />
+                    <input required type="text" placeholder="Member Name" value={newTechForm.name} onChange={e => setNewTechForm({...newTechForm, name: e.target.value})} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold border-none outline-none focus:ring-4 focus:ring-blue-600/5 transition-all" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Cell Phone</label>
+                      <input required type="text" placeholder="(555) 555-5555" value={newTechForm.phone} onChange={e => setNewTechForm({...newTechForm, phone: formatPhoneNumberInput(e.target.value)})} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold border-none outline-none focus:ring-4 focus:ring-blue-600/5 transition-all" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Email Address</label>
+                      <input type="email" placeholder="tech@company.com" value={newTechForm.email} onChange={e => setNewTechForm({...newTechForm, email: e.target.value})} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold border-none outline-none focus:ring-4 focus:ring-blue-600/5 transition-all" />
+                    </div>
                   </div>
                   <div>
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Cell Phone</label>
-                    <input required type="text" placeholder="(555) 555-5555" value={newTechForm.phone} onChange={e => setNewTechForm({...newTechForm, phone: formatPhoneNumberInput(e.target.value)})} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold border-none outline-none focus:ring-4 focus:ring-blue-600/5 transition-all" />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Email Address</label>
-                    <input type="email" placeholder="tech@company.com" value={newTechForm.email} onChange={e => setNewTechForm({...newTechForm, email: e.target.value})} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold border-none outline-none focus:ring-4 focus:ring-blue-600/5 transition-all" />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Technician Role</label>
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Company Role</label>
                     <select value={newTechForm.role} onChange={e => setNewTechForm({...newTechForm, role: e.target.value as Role})} className="w-full px-6 py-4 bg-slate-50 rounded-2xl font-bold border-none outline-none focus:ring-4 focus:ring-blue-600/5 transition-all cursor-pointer">
                       <option value={Role.LEAD}>Lead Technician</option>
                       <option value={Role.ASSISTANT}>Assistant Technician</option>
+                      <option value={Role.OWNER}>Owner</option>
+                      <option value={Role.MANAGER}>Manager</option>
+                      <option value={Role.SUPPORT}>Support / Admin</option>
                     </select>
+                  </div>
+                  <div className="p-4 bg-blue-50 border border-blue-100 rounded-2xl flex items-center gap-3">
+                    <Info size={16} className="text-blue-500" />
+                    <p className="text-[10px] font-bold text-blue-700 leading-tight">This member will automatically be added as a 'Team Member' contact for internal messaging.</p>
                   </div>
                 </div>
                 <button type="submit" disabled={isSyncing} className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest text-[11px] shadow-xl shadow-blue-600/30 hover:bg-blue-700 transition-all flex items-center justify-center gap-3 active:scale-95 disabled:opacity-50">
                   {isSyncing ? <RefreshCw className="animate-spin" size={20} /> : <UserPlus size={20} />}
-                  {isSyncing ? 'Creating...' : 'Add New Technician'}
+                  {isSyncing ? 'Creating...' : 'Sync Member & Contact'}
                 </button>
               </form>
            </div>

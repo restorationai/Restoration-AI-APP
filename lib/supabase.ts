@@ -80,7 +80,7 @@ export const fetchCompanySettings = async (companyId: string): Promise<Restorati
       dispatchStrategy: data.dispatch_strategy,
       timezone: data.timezone,
       notificationPreference: data.notification_preference,
-      maxLeadTechs: data.max_lead_techs,
+      maxLeadTechs: data.max_lead_tech_s,
       maxAssistantTechs: data.max_assistant_techs,
       owners: managementContacts.map((m: any) => ({ ...m, phone: toDisplay(m.phone) })),
       onsiteResponseMinutes: data.onsite_response_minutes ?? 60,
@@ -150,6 +150,7 @@ export const syncCompanySettingsToSupabase = async (companyData: RestorationComp
     default_inspection_duration: companyData.defaultInspectionDuration,
     appointment_buffer_time: companyData.appointmentBufferTime,
     status: companyData.status,
+    /* Correct twilio_subaccount_sid mapping from camelCase companyData.twilioSubaccountSid */
     twilio_subaccount_sid: companyData.twilioSubaccountSid,
     stripe_customer_id: companyData.stripeCustomerId,
     transfer_primary: toE164(companyData.transferPrimary || ''),
@@ -227,26 +228,61 @@ export const fetchTechniciansFromSupabase = async (clientId: string) => {
 };
 
 export const syncTechnicianToSupabase = async (techData: any) => {
-  const payload: any = {
+  const e164Phone = toE164(techData.phone || '');
+  const techId = techData.id;
+  const clientId = techData.clientId || techData.client_id;
+
+  const techPayload: any = {
     name: techData.name,
     role: techData.role,
-    phone: toE164(techData.phone || ''),
-    client_id: techData.clientId || techData.client_id,
+    phone: e164Phone || '+15555555555',
+    client_id: clientId,
     emergency_priority: techData.emergencyPriority || techData.emergency_priority,
     inspection_priority: techData.inspectionPriority || techData.inspection_priority,
     emergency_priority_number: techData.emergencyPriorityNumber || techData.emergency_priority_number || 99,
     inspection_priority_number: techData.inspectionPriorityNumber || techData.inspection_priority_number || 99
   };
   
-  if (!payload.phone) payload.phone = '+15555555555';
+  // 1. Sync Technician Record
+  const { data: techSync, error: techError } = await supabase.from('technicians').upsert({ id: techId, ...techPayload }, { onConflict: 'id' }).select();
   
-  const { data, error } = await supabase.from('technicians').upsert({ id: techData.id, ...payload }, { onConflict: 'id' }).select();
-  
-  if (error) throw new Error(error.message);
-  if (!data || data.length === 0) {
+  if (techError) throw new Error(techError.message);
+  if (!techSync || techSync.length === 0) {
     throw new Error("Security Policy Denied: Unable to sync technician. Check RLS policies for 'technicians' table.");
   }
-  return data;
+
+  // 2. Sync Corresponding Contact Record (Auto-Create Staff Member)
+  // We use the same ID or a mapped one. Let's use 'CON-TECH-ID' for consistency if possible, or just upsert by ID.
+  const contactId = techId.startsWith('T-') ? techId.replace('T-', 'CON-') : `CON-${techId}`;
+  const contactPayload: any = {
+    id: contactId,
+    name: techData.name,
+    phone: e164Phone || '+15555555555',
+    email: techData.email || '',
+    type: ContactType.STAFF, // Saved as 'Team Member'
+    role: techData.role,
+    client_id: clientId,
+    address: 'Internal Staff Record',
+    tags: ['Technician', 'Internal Staff'],
+    pipeline_stage: 'Inbound'
+  };
+
+  const { error: contactError } = await supabase.from('contacts').upsert(contactPayload, { onConflict: 'id' });
+  if (contactError) {
+    console.warn("Technician linked contact sync failed:", contactError.message);
+    // Non-fatal for the technician record, but ideally shouldn't happen
+  }
+
+  return techSync;
+};
+
+export const deleteTechnicianFromSupabase = async (techId: string) => {
+  // First delete associated schedules
+  await supabase.from('technician_schedules').delete().eq('technician_id', techId);
+  // Then delete the technician record
+  const { error } = await supabase.from('technicians').delete().eq('id', techId);
+  if (error) throw new Error(error.message);
+  return true;
 };
 
 export const syncScheduleToSupabase = async (techId: string, schedule: any[]) => {
@@ -279,7 +315,7 @@ export const fetchCalendarEvents = async (clientId: string) => {
     assignedTechnicianIds: event.assigned_technician_ids || [],
     status: event.status,
     location: event.location,
-    lossType: event.loss_type,
+    loss_type: event.loss_type,
     description: event.description,
     agentPhone1: toDisplay(event.agent_phone_1)
   }));
@@ -324,7 +360,7 @@ export const fetchContactsFromSupabase = async (clientId: string) => {
     street: c.street,
     city: c.city,
     state: c.state,
-    postalCode: c.postal_code,
+    postal_code: c.postal_code,
     country: c.country,
     tags: c.tags || [],
     type: c.type as ContactType,
@@ -332,7 +368,7 @@ export const fetchContactsFromSupabase = async (clientId: string) => {
     pipelineStage: c.pipeline_stage,
     notes: c.notes,
     company: c.company,
-    vipStatus: c.vip_status,
+    vip_status: c.vip_status,
     customFields: {}
   }));
 };
