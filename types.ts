@@ -55,7 +55,6 @@ export enum ContactType {
 
 export type AppointmentType = 'emergency' | 'inspection';
 
-// Fix: Use union operator (|) instead of commas for type definition to prevent cascading type errors
 export type PipelineStage = 'Inbound' | 'Dispatching' | 'In Progress' | 'Completion' | 'Invoiced';
 
 export interface GHLCustomFields {
@@ -150,6 +149,7 @@ export interface CalendarEvent {
   location: string;
   description?: string;
   lossType?: string;
+  agentPhone1?: string; // Added for dispatch origin tracking
 }
 
 export interface TeamMember {
@@ -169,12 +169,12 @@ export interface CustomField {
 
 export interface Contact {
   id: string;
-  name: string; // Full name (usually computed/concatenated)
+  name: string; 
   firstName?: string;
   lastName?: string;
   phone: string;
   email: string;
-  address: string; // Legacy full string
+  address: string; 
   street?: string;
   city?: string;
   state?: string;
@@ -232,7 +232,7 @@ export interface DaySchedule {
   is24Hours?: boolean;
   start: string;
   end: string;
-  override: 'None' | 'Force Active' | 'Force Off Duty';
+  override?: 'None' | 'Force Active' | 'Force Off Duty';
 }
 
 export interface RestorationCompany {
@@ -261,9 +261,19 @@ export interface RestorationCompany {
   plan: string;
   totalDispatches: number;
   customFieldConfig: CustomField[];
-  // New billing & routing fields
   twilioSubaccountSid?: string;
   stripeCustomerId?: string;
+  transferPrimary?: string;
+  transferSecondary?: string;
+  transferThird?: string;
+  inspectionSchedule: DaySchedule[];
+  // Flat Transfer Directory Columns
+  transfer_1_name?: string; transfer_1_phone?: string;
+  transfer_2_name?: string; transfer_2_phone?: string;
+  transfer_3_name?: string; transfer_3_phone?: string;
+  transfer_4_name?: string; transfer_4_phone?: string;
+  transfer_5_name?: string; transfer_5_phone?: string;
+  transfer_6_name?: string; transfer_6_phone?: string;
 }
 
 export interface Technician {

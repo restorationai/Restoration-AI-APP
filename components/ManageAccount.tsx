@@ -20,7 +20,8 @@ import {
   Users,
   BellRing,
   AlertTriangle,
-  Globe
+  Globe,
+  Calendar
 } from 'lucide-react';
 import { SERVICE_OPTIONS, TIMEZONES } from '../constants';
 import { DispatchStrategy, NotificationPreference, RestorationCompany } from '../types';
@@ -33,6 +34,24 @@ interface ManageAccountProps {
   companySettings: RestorationCompany;
   onSettingsUpdate: (settings: RestorationCompany) => void;
 }
+
+const GENERATE_TIME_SLOTS = () => {
+  const slots: string[] = [];
+  const periods = ['AM', 'PM'];
+  for (let p = 0; p < 2; p++) {
+    for (let h = 0; h < 12; h++) {
+      const hour = h === 0 ? 12 : h;
+      for (let m = 0; m < 60; m += 30) {
+        const min = m === 0 ? '00' : m;
+        slots.push(`${hour}:${min} ${periods[p]}`);
+      }
+    }
+  }
+  slots.push('12:00 AM');
+  return slots;
+};
+
+const TIME_SLOTS = GENERATE_TIME_SLOTS();
 
 const ManageAccount: React.FC<ManageAccountProps> = ({ isOpen, onClose, companySettings, onSettingsUpdate }) => {
   const [expandedSection, setExpandedSection] = useState<string | null>('business');
@@ -220,7 +239,74 @@ const ManageAccount: React.FC<ManageAccountProps> = ({ isOpen, onClose, companyS
                         </div>
                       </div>
 
-                      {/* HIGH VISIBILITY EMERGENCY SECTION */}
+                      {/* MASTER INSPECTION HOURS SECTION - Updated with text-slate-900 for high visibility */}
+                      <div className="bg-slate-50 p-8 rounded-[2.5rem] border border-slate-200 space-y-6">
+                         <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                               <Calendar className="text-blue-600" size={18} />
+                               <h4 className="text-[10px] font-black text-slate-600 uppercase tracking-[0.3em]">Master Inspection Availability</h4>
+                            </div>
+                            <p className="text-[9px] font-bold text-slate-400 uppercase italic">Sarah AI Booking Window</p>
+                         </div>
+                         <div className="bg-white rounded-[2rem] border border-slate-100 overflow-hidden shadow-sm">
+                            <table className="w-full text-left">
+                               <thead className="bg-slate-50/50 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">
+                                  <tr>
+                                     <th className="px-6 py-3">Day</th>
+                                     <th className="px-6 py-3">Status</th>
+                                     <th className="px-6 py-3">Hours</th>
+                                  </tr>
+                               </thead>
+                               <tbody className="divide-y divide-slate-50">
+                                  {settings.inspectionSchedule.map((s, idx) => (
+                                     <tr key={s.day} className={s.enabled ? 'bg-white' : 'bg-slate-50/50 opacity-60'}>
+                                        <td className="px-6 py-4 font-black text-slate-800 text-xs">{s.day}</td>
+                                        <td className="px-6 py-4">
+                                           <button 
+                                              onClick={() => {
+                                                 const newSched = [...settings.inspectionSchedule];
+                                                 newSched[idx].enabled = !newSched[idx].enabled;
+                                                 setSettings({...settings, inspectionSchedule: newSched});
+                                              }}
+                                              className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase transition-all ${s.enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}
+                                           >
+                                              {s.enabled ? 'Open' : 'Closed'}
+                                           </button>
+                                        </td>
+                                        <td className="px-6 py-4 flex items-center gap-2">
+                                           <select 
+                                              disabled={!s.enabled}
+                                              value={s.start}
+                                              onChange={(e) => {
+                                                 const newSched = [...settings.inspectionSchedule];
+                                                 newSched[idx].start = e.target.value;
+                                                 setSettings({...settings, inspectionSchedule: newSched});
+                                              }}
+                                              className="bg-slate-50 border border-slate-100 rounded-lg px-2 py-1 text-[10px] font-black text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-30"
+                                           >
+                                              {TIME_SLOTS.map(t => <option key={t} value={t}>{t}</option>)}
+                                           </select>
+                                           <span className="text-[10px] font-black text-slate-300">-</span>
+                                           <select 
+                                              disabled={!s.enabled}
+                                              value={s.end}
+                                              onChange={(e) => {
+                                                 const newSched = [...settings.inspectionSchedule];
+                                                 newSched[idx].end = e.target.value;
+                                                 setSettings({...settings, inspectionSchedule: newSched});
+                                              }}
+                                              className="bg-slate-50 border border-slate-100 rounded-lg px-2 py-1 text-[10px] font-black text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-30"
+                                           >
+                                              {TIME_SLOTS.map(t => <option key={t} value={t}>{t}</option>)}
+                                           </select>
+                                        </td>
+                                     </tr>
+                                  ))}
+                               </tbody>
+                            </table>
+                         </div>
+                      </div>
+
                       <div className="bg-red-50 p-8 rounded-[2.5rem] border border-red-200 space-y-4 shadow-sm">
                          <div className="flex items-center gap-3">
                            <AlertTriangle className="text-red-600" size={20} />

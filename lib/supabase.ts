@@ -1,6 +1,6 @@
 
 import { createClient } from '@supabase/supabase-js';
-import { Status, InspectionStatus, Contact, ContactType, Job, PipelineStage, Conversation, Message, ConversationSource, Role } from '../types.ts';
+import { Status, InspectionStatus, Contact, ContactType, Job, PipelineStage, Conversation, Message, ConversationSource, Role, RestorationCompany, CalendarEvent, DaySchedule } from '../types.ts';
 import { toE164, toDisplay } from '../utils/phoneUtils.ts';
 
 const SUPABASE_URL = 'https://nyscciinkhlutvqkgyvq.supabase.co';
@@ -10,6 +10,16 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const N8N_MASTER_OUTBOUND_WEBHOOK = 'https://restorationai.app.n8n.cloud/webhook/master-outbound-sms'; 
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const DEFAULT_CORP_SCHEDULE: DaySchedule[] = [
+  { day: 'Mon', enabled: true, is24Hours: false, start: '08:00 AM', end: '05:00 PM', override: 'None' },
+  { day: 'Tue', enabled: true, is24Hours: false, start: '08:00 AM', end: '05:00 PM', override: 'None' },
+  { day: 'Wed', enabled: true, is24Hours: false, start: '08:00 AM', end: '05:00 PM', override: 'None' },
+  { day: 'Thu', enabled: true, is24Hours: false, start: '08:00 AM', end: '05:00 PM', override: 'None' },
+  { day: 'Fri', enabled: true, is24Hours: false, start: '08:00 AM', end: '05:00 PM', override: 'None' },
+  { day: 'Sat', enabled: false, is24Hours: false, start: '08:00 AM', end: '05:00 PM', override: 'None' },
+  { day: 'Sun', enabled: false, is24Hours: false, start: '08:00 AM', end: '05:00 PM', override: 'None' },
+];
 
 /**
  * AUTHENTICATION
@@ -40,8 +50,375 @@ export const getCurrentUser = async () => {
 export const signOut = () => supabase.auth.signOut();
 
 /**
- * MESSAGING & CONVERSATIONS
+ * DATA FETCHERS
  */
+export const fetchCompanySettings = async (companyId: string): Promise<RestorationCompany | null> => {
+  try {
+    const { data, error } = await supabase
+      .from('companies')
+      .select('*')
+      .eq('id', companyId)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) return null;
+
+    let managementContacts = data.management_contacts;
+    if (!managementContacts || !Array.isArray(managementContacts) || managementContacts.length === 0) {
+      managementContacts = [{ name: data.owner_1_name || '', phone: data.owner_1_phone || '', email: data.owner_1_email || '' }];
+    }
+
+    const joinedDateFormatted = data.joined_date 
+      ? new Date(data.joined_date).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+      : 'New Account';
+
+    return {
+      id: data.id,
+      name: data.name,
+      agentName: data.agent_name,
+      agentPhone1: toDisplay(data.agent_phone_1),
+      dispatchStrategy: data.dispatch_strategy,
+      timezone: data.timezone,
+      notificationPreference: data.notification_preference,
+      maxLeadTechs: data.max_lead_techs,
+      maxAssistantTechs: data.max_assistant_techs,
+      owners: managementContacts.map((m: any) => ({ ...m, phone: toDisplay(m.phone) })),
+      onsiteResponseMinutes: data.onsite_response_minutes ?? 60,
+      centerZipCode: data.center_zip_code || '',
+      serviceMileRadius: data.service_mile_radius ?? 45,
+      services: data.services || [],
+      ghlLocationId: data.id,
+      status: data.status || 'Active',
+      minimumSchedulingNotice: data.minimum_scheduling_notice ?? 4,
+      defaultInspectionDuration: data.default_inspection_duration ?? 120,
+      appointmentBufferTime: data.appointment_buffer_time ?? 30,
+      serviceAreas: data.service_areas || '',
+      joinedDate: joinedDateFormatted,
+      ownerName: managementContacts[0]?.name || '',
+      plan: 'Pro AI',
+      totalDispatches: 0,
+      customFieldConfig: [],
+      twilioSubaccountSid: data.twilio_subaccount_sid,
+      stripeCustomerId: data.stripe_customer_id,
+      transferPrimary: toDisplay(data.transfer_primary),
+      transferSecondary: toDisplay(data.transfer_secondary),
+      transferThird: toDisplay(data.transfer_third),
+      inspectionSchedule: data.inspection_schedule && Array.isArray(data.inspection_schedule) && data.inspection_schedule.length > 0 
+        ? data.inspection_schedule 
+        : DEFAULT_CORP_SCHEDULE,
+      // Individual Directory Slots
+      transfer_1_name: data.transfer_1_name, transfer_1_phone: toDisplay(data.transfer_1_phone),
+      transfer_2_name: data.transfer_2_name, transfer_2_phone: toDisplay(data.transfer_2_phone),
+      transfer_3_name: data.transfer_3_name, transfer_3_phone: toDisplay(data.transfer_3_phone),
+      transfer_4_name: data.transfer_4_name, transfer_4_phone: toDisplay(data.transfer_4_phone),
+      transfer_5_name: data.transfer_5_name, transfer_5_phone: toDisplay(data.transfer_5_phone),
+      transfer_6_name: data.transfer_6_name, transfer_6_phone: toDisplay(data.transfer_6_phone),
+    };
+  } catch (err) {
+    console.error("fetchCompanySettings error:", err);
+    return null;
+  }
+};
+
+export const syncCompanySettingsToSupabase = async (companyData: RestorationCompany) => {
+  const primaryRecipient = companyData.owners?.[0] || { name: '', phone: '', email: '' };
+  
+  const ownersE164 = companyData.owners.map((o: any) => ({ 
+    ...o, 
+    phone: toE164(o.phone || '') 
+  }));
+
+  const payload: any = {
+    name: companyData.name,
+    agent_name: companyData.agentName,
+    agent_phone_1: toE164(companyData.agentPhone1 || ''),
+    dispatch_strategy: companyData.dispatchStrategy,
+    timezone: companyData.timezone,
+    notification_preference: companyData.notificationPreference,
+    max_lead_techs: companyData.maxLeadTechs,
+    max_assistant_techs: companyData.maxAssistantTechs,
+    management_contacts: ownersE164,
+    owner_1_name: primaryRecipient.name || '',
+    owner_1_phone: toE164(primaryRecipient.phone || ''),
+    owner_1_email: primaryRecipient.email || '',
+    onsite_response_minutes: companyData.onsiteResponseMinutes,
+    center_zip_code: companyData.centerZipCode,
+    service_mile_radius: companyData.serviceMileRadius,
+    services: companyData.services,
+    service_areas: companyData.serviceAreas,
+    minimum_scheduling_notice: companyData.minimumSchedulingNotice,
+    default_inspection_duration: companyData.defaultInspectionDuration,
+    appointment_buffer_time: companyData.appointmentBufferTime,
+    status: companyData.status,
+    twilio_subaccount_sid: companyData.twilioSubaccountSid,
+    stripe_customer_id: companyData.stripeCustomerId,
+    transfer_primary: toE164(companyData.transferPrimary || ''),
+    transfer_secondary: toE164(companyData.transferSecondary || ''),
+    transfer_third: toE164(companyData.transferThird || ''),
+    inspection_schedule: companyData.inspectionSchedule,
+    transfer_1_name: companyData.transfer_1_name || null, transfer_1_phone: toE164(companyData.transfer_1_phone || ''),
+    transfer_2_name: companyData.transfer_2_name || null, transfer_2_phone: toE164(companyData.transfer_2_phone || ''),
+    transfer_3_name: companyData.transfer_3_name || null, transfer_3_phone: toE164(companyData.transfer_3_phone || ''),
+    transfer_4_name: companyData.transfer_4_name || null, transfer_4_phone: toE164(companyData.transfer_4_phone || ''),
+    transfer_5_name: companyData.transfer_5_name || null, transfer_5_phone: toE164(companyData.transfer_5_phone || ''),
+    transfer_6_name: companyData.transfer_6_name || null, transfer_6_phone: toE164(companyData.transfer_6_phone || ''),
+  };
+
+  // Strip undefined values to avoid Supabase errors
+  Object.keys(payload).forEach(key => payload[key] === undefined && delete payload[key]);
+
+  const { data, error } = await supabase
+    .from('companies')
+    .update(payload)
+    .eq('id', companyData.id)
+    .select();
+
+  if (error) {
+    console.error("Supabase syncCompanySettings Error:", error);
+    throw new Error(error.message);
+  }
+
+  // LOUD ERROR: If RLS blocked the update, data will be empty but error will be null.
+  if (!data || data.length === 0) {
+    throw new Error("Security Policy Denied: Database rejected the update. Please check if you have permission to edit this record in Supabase (missing UPDATE policy).");
+  }
+
+  return data;
+};
+
+export const fetchTechniciansFromSupabase = async (clientId: string) => {
+  const { data, error } = await supabase
+    .from('technicians')
+    .select('*, technician_schedules (*)')
+    .eq('client_id', clientId);
+  if (error) throw new Error(error.message);
+  return (data || []).map((tech: any) => {
+    const rawSchedules = tech.technician_schedules || [];
+    const dayOrder = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const formattedSchedule = dayOrder.map(day => {
+      const match = rawSchedules.find((s: any) => s.day_name === day);
+      return match ? {
+        day: match.day_name,
+        enabled: match.is_enabled,
+        is24Hours: match.is_24h,
+        start: match.start_time ? match.start_time.slice(0, 5) : '08:00',
+        end: match.end_time ? match.end_time.slice(0, 5) : '17:00',
+        override: match.override_status || 'None'
+      } : { day, enabled: true, is24Hours: false, start: '08:00', end: '17:00', override: 'None' };
+    });
+    return {
+      id: tech.id,
+      name: tech.name,
+      role: tech.role as Role,
+      phone: toDisplay(tech.phone),
+      email: tech.email || '',
+      clientId: tech.client_id,
+      emergencyPriority: tech.emergency_priority,
+      emergencyPriorityNumber: tech.emergency_priority_number,
+      emergencyStatus: tech.emergency_status || Status.OFF_DUTY,
+      emergencySchedule: formattedSchedule,
+      inspectionPriority: tech.inspection_priority,
+      inspectionPriorityNumber: tech.inspection_priority_number,
+      inspectionStatus: tech.inspection_status || InspectionStatus.UNAVAILABLE,
+      inspectionStatusDate: tech.inspection_status_date,
+      inspectionSchedule: formattedSchedule
+    };
+  });
+};
+
+export const syncTechnicianToSupabase = async (techData: any) => {
+  const payload: any = {
+    name: techData.name,
+    role: techData.role,
+    phone: toE164(techData.phone || ''),
+    client_id: techData.clientId || techData.client_id,
+    emergency_priority: techData.emergencyPriority || techData.emergency_priority,
+    inspection_priority: techData.inspectionPriority || techData.inspection_priority,
+    emergency_priority_number: techData.emergencyPriorityNumber || techData.emergency_priority_number || 99,
+    inspection_priority_number: techData.inspectionPriorityNumber || techData.inspection_priority_number || 99
+  };
+  
+  if (!payload.phone) payload.phone = '+15555555555';
+  
+  const { data, error } = await supabase.from('technicians').upsert({ id: techData.id, ...payload }, { onConflict: 'id' }).select();
+  
+  if (error) throw new Error(error.message);
+  if (!data || data.length === 0) {
+    throw new Error("Security Policy Denied: Unable to sync technician. Check RLS policies for 'technicians' table.");
+  }
+  return data;
+};
+
+export const syncScheduleToSupabase = async (techId: string, schedule: any[]) => {
+  await supabase.from('technician_schedules').delete().eq('technician_id', techId);
+  const rows = schedule.map(s => ({
+    technician_id: techId,
+    day_name: s.day,
+    is_enabled: s.enabled,
+    is_24h: s.is_24h || false,
+    start_time: s.start || null,
+    end_time: s.end || null,
+    override_status: s.override || 'None'
+  }));
+  const { data, error: insertError } = await supabase.from('technician_schedules').insert(rows).select();
+  if (insertError) throw new Error(insertError.message);
+  return data;
+};
+
+export const fetchCalendarEvents = async (clientId: string) => {
+  const { data, error } = await supabase.from('calendar_events').select('*').eq('client_id', clientId);
+  if (error) throw new Error(error.message);
+  return (data || []).map((event: any) => ({
+    id: event.id,
+    type: event.type,
+    title: event.title,
+    startTime: event.start_time,
+    endTime: event.end_time,
+    contactId: event.contact_id,
+    jobId: event.job_id,
+    assignedTechnicianIds: event.assigned_technician_ids || [],
+    status: event.status,
+    location: event.location,
+    lossType: event.loss_type,
+    description: event.description,
+    agentPhone1: toDisplay(event.agent_phone_1)
+  }));
+};
+
+export const syncCalendarEventToSupabase = async (event: any, clientId: string) => {
+  const { data, error } = await supabase.from('calendar_events').upsert({
+    id: event.id,
+    type: event.type,
+    title: event.title,
+    start_time: event.startTime,
+    end_time: event.endTime,
+    contact_id: event.contactId,
+    job_id: event.jobId || null,
+    assigned_technician_ids: event.assigned_technician_ids,
+    status: event.status,
+    location: event.location,
+    loss_type: event.loss_type,
+    description: event.description,
+    client_id: clientId,
+    agent_phone_1: toE164(event.agentPhone1 || '')
+  }, { onConflict: 'id' }).select();
+  
+  if (error) throw new Error(error.message);
+  if (!data || data.length === 0) {
+    throw new Error("Security Policy Denied: Unable to sync event. Check RLS policies for 'calendar_events' table.");
+  }
+  return data;
+};
+
+export const fetchContactsFromSupabase = async (clientId: string) => {
+  const { data, error } = await supabase.from('contacts').select('*').eq('client_id', clientId);
+  if (error) throw new Error(error.message);
+  return (data || []).map((c: any) => ({
+    id: c.id,
+    name: c.name,
+    firstName: c.first_name,
+    lastName: c.last_name,
+    phone: toDisplay(c.phone),
+    email: c.email,
+    address: c.address,
+    street: c.street,
+    city: c.city,
+    state: c.state,
+    postalCode: c.postal_code,
+    country: c.country,
+    tags: c.tags || [],
+    type: c.type as ContactType,
+    role: c.role as Role,
+    pipelineStage: c.pipeline_stage,
+    notes: c.notes,
+    company: c.company,
+    vipStatus: c.vip_status,
+    customFields: {}
+  }));
+};
+
+export const syncContactToSupabase = async (contact: Contact, clientId: string) => {
+  const { data, error } = await supabase.from('contacts').upsert({
+    id: contact.id,
+    name: contact.name,
+    first_name: contact.firstName,
+    last_name: contact.lastName,
+    phone: toE164(contact.phone || ''),
+    email: contact.email,
+    address: contact.address,
+    street: contact.street,
+    city: contact.city,
+    state: contact.state,
+    postal_code: contact.postalCode,
+    country: contact.country,
+    tags: contact.tags,
+    type: contact.type,
+    role: contact.role,
+    pipeline_stage: contact.pipelineStage,
+    client_id: clientId,
+    notes: contact.notes,
+    company: contact.company,
+    vip_status: contact.vipStatus
+  }, { onConflict: 'id' }).select();
+  
+  if (error) throw new Error(error.message);
+  if (!data || data.length === 0) {
+    throw new Error("Security Policy Denied: Unable to sync contact. Check RLS policies for 'contacts' table.");
+  }
+  return data;
+};
+
+export const fetchJobsFromSupabase = async (clientId: string): Promise<Job[]> => {
+  const { data, error } = await supabase
+    .from('jobs')
+    .select('*')
+    .eq('client_id', clientId)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data || []).map((j: any) => ({
+    id: j.id,
+    contactId: j.contact_id,
+    propertyManagerId: j.property_manager_id,
+    title: j.title,
+    stage: j.stage as PipelineStage,
+    status: j.status as 'Open' | 'Closed', 
+    lossType: j.loss_type || 'Other',
+    assignedTechIds: j.assigned_tech_ids || [],
+    urgency: j.urgency as any || 'Medium',
+    estimatedValue: Number(j.estimated_value) || 0,
+    timestamp: new Date(j.created_at).toLocaleDateString(),
+    customFields: j.custom_fields || {},
+    notes: j.notes || [], 
+    readings: j.readings || [], 
+    financials: j.financials || [], 
+    documents: j.documents || []
+  }));
+};
+
+export const syncJobToSupabase = async (job: Job, clientId: string) => {
+  const { data, error } = await supabase.from('jobs').upsert({
+    id: job.id,
+    client_id: clientId,
+    contact_id: job.contactId,
+    property_manager_id: job.propertyManagerId || null,
+    title: job.title,
+    stage: job.stage,
+    status: job.status, 
+    loss_type: job.lossType,
+    urgency: job.urgency,
+    estimated_value: job.estimatedValue,
+    assigned_tech_ids: job.assignedTechIds,
+    custom_fields: job.customFields,
+    notes: job.notes 
+  }, { onConflict: 'id' }).select();
+  
+  if (error) throw new Error(error.message);
+  if (!data || data.length === 0) {
+    throw new Error("Security Policy Denied: Unable to sync job file. Check RLS policies for 'jobs' table.");
+  }
+  return data;
+};
+
 export const fetchConversations = async (companyId: string): Promise<Conversation[]> => {
   const { data, error } = await supabase
     .from('conversations')
@@ -140,13 +517,7 @@ export const fetchMessages = async (conversationId: string): Promise<Message[]> 
   }));
 };
 
-/**
- * sendMessageToDb Refactor:
- * Now purely triggers the n8n Master Webhook. 
- * n8n handles the Supabase INSERT to capture Twilio SIDs and avoid double-logging.
- */
 export const sendMessageToDb = async (msg: Partial<Message>, conversationId: string, companyId: string) => {
-  // 1. Resolve Routing Details (To/From numbers)
   const { data: convData } = await supabase
     .from('conversations')
     .select('contact_id, company_id, source')
@@ -162,12 +533,8 @@ export const sendMessageToDb = async (msg: Partial<Message>, conversationId: str
 
   const toPhone = contactRes.data?.phone || '';
   const fromPhone = companyRes.data?.agent_phone_1 || '';
-
-  // 2. Classify Sender (Ensure manual staff replies are 'user')
   const advisorSenderType = msg.sender === 'ai' ? 'ai' : (msg.sender === 'agent' ? 'user' : 'system');
 
-  // 3. Trigger Master Outbound Webhook 
-  // We no longer perform a local supabase.insert here to prevent double-logging.
   if (N8N_MASTER_OUTBOUND_WEBHOOK) {
     try {
       const response = await fetch(N8N_MASTER_OUTBOUND_WEBHOOK, {
@@ -178,7 +545,7 @@ export const sendMessageToDb = async (msg: Partial<Message>, conversationId: str
           conversation_id: conversationId,
           to: toPhone,
           from: fromPhone,
-          message: msg.content || null, // MMS support (content can be null)
+          message: msg.content || null,
           media_url: msg.mediaUrls && msg.mediaUrls.length > 0 ? msg.mediaUrls[0] : null,
           sender_type: advisorSenderType,
           internal_id: `WEB-${Date.now()}` 
@@ -197,313 +564,4 @@ export const sendMessageToDb = async (msg: Partial<Message>, conversationId: str
   }
 
   throw new Error("Master Outbound Webhook is not configured.");
-};
-
-/**
- * DATA FETCHERS
- */
-export const fetchCompanySettings = async (companyId: string) => {
-  try {
-    const { data, error } = await supabase
-      .from('companies')
-      .select('*')
-      .eq('id', companyId)
-      .maybeSingle();
-
-    if (error) throw error;
-    if (!data) return null;
-
-    let managementContacts = data.management_contacts;
-    if (!managementContacts || !Array.isArray(managementContacts) || managementContacts.length === 0) {
-      managementContacts = [{ name: data.owner_1_name || '', phone: data.owner_1_phone || '', email: data.owner_1_email || '' }];
-    }
-
-    const joinedDateFormatted = data.joined_date 
-      ? new Date(data.joined_date).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
-      : 'New Account';
-
-    return {
-      id: data.id,
-      name: data.name,
-      agentName: data.agent_name,
-      agentPhone1: toDisplay(data.agent_phone_1),
-      dispatchStrategy: data.dispatch_strategy,
-      timezone: data.timezone,
-      notificationPreference: data.notification_preference,
-      maxLeadTechs: data.max_lead_techs,
-      maxAssistantTechs: data.max_assistant_techs,
-      owners: managementContacts.map((m: any) => ({ ...m, phone: toDisplay(m.phone) })),
-      onsiteResponseMinutes: data.onsite_response_minutes ?? 60,
-      centerZipCode: data.center_zip_code || '',
-      serviceMileRadius: data.service_mile_radius ?? 45,
-      services: data.services || [],
-      ghlLocationId: data.id,
-      status: data.status || 'Active',
-      minimumSchedulingNotice: data.minimum_scheduling_notice ?? 4,
-      defaultInspectionDuration: data.default_inspection_duration ?? 120,
-      appointmentBufferTime: data.appointment_buffer_time ?? 30,
-      serviceAreas: data.service_areas || '',
-      joinedDate: joinedDateFormatted,
-      ownerName: managementContacts[0]?.name || '',
-      plan: 'Pro AI',
-      totalDispatches: 0,
-      customFieldConfig: [],
-      twilioSubaccountSid: data.twilio_subaccount_sid,
-      stripeCustomerId: data.stripe_customer_id
-    };
-  } catch (err) {
-    console.error("fetchCompanySettings error:", err);
-    return null;
-  }
-};
-
-export const syncCompanySettingsToSupabase = async (companyData: any) => {
-  const primaryRecipient = companyData.owners?.[0] || { name: '', phone: '', email: '' };
-  const ownersE164 = companyData.owners.map((o: any) => ({ ...o, phone: toE164(o.phone) }));
-
-  const { data, error } = await supabase
-    .from('companies')
-    .upsert({
-      id: companyData.id,
-      name: companyData.name,
-      agent_name: companyData.agentName,
-      agent_phone_1: toE164(companyData.agentPhone1),
-      dispatch_strategy: companyData.dispatch_strategy,
-      timezone: companyData.timezone,
-      notification_preference: companyData.notificationPreference,
-      max_lead_techs: companyData.max_lead_techs,
-      max_assistant_techs: companyData.max_assistant_techs,
-      management_contacts: ownersE164,
-      owner_1_name: primaryRecipient.name,
-      owner_1_phone: toE164(primaryRecipient.phone),
-      owner_1_email: primaryRecipient.email,
-      onsite_response_minutes: companyData.onsiteResponseMinutes,
-      center_zip_code: companyData.centerZipCode,
-      service_mile_radius: companyData.serviceMileRadius,
-      services: companyData.services,
-      service_areas: companyData.serviceAreas,
-      minimum_scheduling_notice: companyData.minimumSchedulingNotice,
-      default_inspection_duration: companyData.defaultInspectionDuration,
-      appointment_buffer_time: companyData.appointmentBufferTime,
-      status: companyData.status,
-      twilio_subaccount_sid: companyData.twilio_subaccount_sid,
-      stripe_customer_id: companyData.stripeCustomerId
-    }, { onConflict: 'id' })
-    .select();
-  if (error) throw new Error(error.message);
-  return data;
-};
-
-export const fetchTechniciansFromSupabase = async (clientId: string) => {
-  const { data, error } = await supabase
-    .from('technicians')
-    .select('*, technician_schedules (*)')
-    .eq('client_id', clientId);
-  if (error) throw new Error(error.message);
-  return (data || []).map((tech: any) => {
-    const rawSchedules = tech.technician_schedules || [];
-    const dayOrder = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    const formattedSchedule = dayOrder.map(day => {
-      const match = rawSchedules.find((s: any) => s.day_name === day);
-      return match ? {
-        day: match.day_name,
-        enabled: match.is_enabled,
-        is24Hours: match.is_24h,
-        start: match.start_time ? match.start_time.slice(0, 5) : '08:00',
-        end: match.end_time ? match.end_time.slice(0, 5) : '17:00',
-        override: match.override_status || 'None'
-      } : { day, enabled: true, is24Hours: false, start: '08:00', end: '17:00', override: 'None' };
-    });
-    return {
-      id: tech.id,
-      name: tech.name,
-      role: tech.role as Role,
-      phone: toDisplay(tech.phone),
-      email: tech.email || '',
-      clientId: tech.client_id,
-      emergencyPriority: tech.emergency_priority,
-      emergencyPriorityNumber: tech.emergency_priority_number,
-      emergencyStatus: tech.emergency_status || Status.OFF_DUTY,
-      emergencySchedule: formattedSchedule,
-      inspectionPriority: tech.inspection_priority,
-      inspectionPriorityNumber: tech.inspection_priority_number,
-      inspectionStatus: tech.inspection_status || InspectionStatus.UNAVAILABLE,
-      inspectionStatusDate: tech.inspection_status_date,
-      inspectionSchedule: formattedSchedule
-    };
-  });
-};
-
-export const syncTechnicianToSupabase = async (techData: any) => {
-  const payload: any = {
-    id: techData.id,
-    name: techData.name,
-    role: techData.role,
-    phone: toE164(techData.phone || '(555) 555-5555'),
-    client_id: techData.client_id,
-    emergency_priority: techData.emergency_priority,
-    inspection_priority: techData.inspection_priority,
-    emergency_priority_number: techData.emergency_priority_number || 99,
-    inspection_priority_number: techData.inspection_priority_number || 99
-  };
-  const { data, error } = await supabase.from('technicians').upsert(payload).select();
-  if (error) throw new Error(error.message);
-  return data;
-};
-
-export const syncScheduleToSupabase = async (techId: string, schedule: any[]) => {
-  await supabase.from('technician_schedules').delete().eq('technician_id', techId);
-  const rows = schedule.map(s => ({
-    technician_id: techId,
-    day_name: s.day,
-    is_enabled: s.enabled,
-    is_24h: s.is_24h || false,
-    start_time: s.start || null,
-    end_time: s.end || null,
-    override_status: s.override || 'None'
-  }));
-  const { data, error: insertError } = await supabase.from('technician_schedules').insert(rows);
-  if (insertError) throw new Error(insertError.message);
-  return data;
-};
-
-export const fetchCalendarEvents = async (clientId: string) => {
-  const { data, error } = await supabase.from('calendar_events').select('*').eq('client_id', clientId);
-  if (error) throw new Error(error.message);
-  return (data || []).map((event: any) => ({
-    id: event.id,
-    type: event.type,
-    title: event.title,
-    startTime: event.start_time,
-    endTime: event.end_time,
-    contactId: event.contact_id,
-    jobId: event.job_id,
-    assignedTechnicianIds: event.assigned_technician_ids || [],
-    status: event.status,
-    location: event.location,
-    lossType: event.loss_type,
-    description: event.description
-  }));
-};
-
-export const syncCalendarEventToSupabase = async (event: any, clientId: string) => {
-  const { data, error } = await supabase.from('calendar_events').upsert({
-    id: event.id,
-    type: event.type,
-    title: event.title,
-    start_time: event.startTime,
-    end_time: event.endTime,
-    contact_id: event.contactId,
-    // Fix: Ensure empty jobId is sent as null to satisfy foreign key constraints
-    job_id: event.jobId || null,
-    assigned_technician_ids: event.assigned_technician_ids,
-    status: event.status,
-    location: event.location,
-    loss_type: event.lossType,
-    description: event.description,
-    client_id: clientId
-  }).select();
-  if (error) throw new Error(error.message);
-  return data;
-};
-
-export const fetchContactsFromSupabase = async (clientId: string) => {
-  const { data, error } = await supabase.from('contacts').select('*').eq('client_id', clientId);
-  if (error) throw new Error(error.message);
-  return (data || []).map((c: any) => ({
-    id: c.id,
-    name: c.name,
-    firstName: c.first_name,
-    lastName: c.last_name,
-    phone: toDisplay(c.phone),
-    email: c.email,
-    address: c.address,
-    street: c.street,
-    city: c.city,
-    state: c.state,
-    postalCode: c.postal_code,
-    country: c.country,
-    tags: c.tags || [],
-    type: c.type as ContactType,
-    role: c.role as Role,
-    pipelineStage: c.pipeline_stage,
-    notes: c.notes,
-    company: c.company,
-    vipStatus: c.vip_status,
-    customFields: {}
-  }));
-};
-
-export const syncContactToSupabase = async (contact: Contact, clientId: string) => {
-  const { data, error } = await supabase.from('contacts').upsert({
-    id: contact.id,
-    name: contact.name,
-    first_name: contact.firstName,
-    last_name: contact.lastName,
-    phone: toE164(contact.phone),
-    email: contact.email,
-    address: contact.address,
-    street: contact.street,
-    city: contact.city,
-    state: contact.state,
-    postal_code: contact.postalCode,
-    country: contact.country,
-    tags: contact.tags,
-    type: contact.type,
-    role: contact.role,
-    pipeline_stage: contact.pipelineStage,
-    client_id: clientId,
-    notes: contact.notes,
-    company: contact.company,
-    vip_status: contact.vipStatus
-  }).select();
-  if (error) throw new Error(error.message);
-  return data;
-};
-
-export const fetchJobsFromSupabase = async (clientId: string): Promise<Job[]> => {
-  const { data, error } = await supabase
-    .from('jobs')
-    .select('*')
-    .eq('client_id', clientId)
-    .order('created_at', { ascending: false });
-  if (error) throw error;
-  return (data || []).map((j: any) => ({
-    id: j.id,
-    contactId: j.contact_id,
-    propertyManagerId: j.property_manager_id,
-    title: j.title,
-    stage: j.stage as PipelineStage,
-    status: j.status as 'Open' | 'Closed', 
-    lossType: j.loss_type || 'Other',
-    assignedTechIds: j.assigned_tech_ids || [],
-    urgency: j.urgency as any || 'Medium',
-    estimatedValue: Number(j.estimated_value) || 0,
-    timestamp: new Date(j.created_at).toLocaleDateString(),
-    customFields: j.custom_fields || {},
-    notes: j.notes || [], 
-    readings: j.readings || [], 
-    financials: j.financials || [], 
-    documents: j.documents || []
-  }));
-};
-
-export const syncJobToSupabase = async (job: Job, clientId: string) => {
-  const { data, error } = await supabase.from('jobs').upsert({
-    id: job.id,
-    client_id: clientId,
-    contact_id: job.contactId,
-    property_manager_id: job.propertyManagerId || null,
-    title: job.title,
-    stage: job.stage,
-    status: job.status, 
-    loss_type: job.lossType,
-    urgency: job.urgency,
-    estimated_value: job.estimatedValue,
-    assigned_tech_ids: job.assignedTechIds,
-    custom_fields: job.customFields,
-    notes: job.notes 
-  }, { onConflict: 'id' }).select();
-  if (error) throw new Error(error.message);
-  return data;
 };

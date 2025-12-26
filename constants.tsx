@@ -86,6 +86,8 @@ export const MOCK_RESTORATION_COMPANIES: RestorationCompany[] = [
     ownerName: "Santino Velci",
     plan: "Pro AI",
     totalDispatches: 145,
+    // Fix: Added missing inspectionSchedule property required by RestorationCompany type
+    inspectionSchedule: [...DEFAULT_SCHEDULE],
     customFieldConfig: [
       { id: 'cf1', label: 'Insurance Carrier', type: 'text' },
       { id: 'cf2', label: 'Policy Number', type: 'text' },
