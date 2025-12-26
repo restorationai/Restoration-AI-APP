@@ -21,7 +21,8 @@ import {
   BellRing,
   AlertTriangle,
   Globe,
-  Calendar
+  Calendar,
+  BellRing as BellIcon
 } from 'lucide-react';
 import { SERVICE_OPTIONS, TIMEZONES } from '../constants';
 import { DispatchStrategy, NotificationPreference, RestorationCompany } from '../types';
@@ -239,7 +240,24 @@ const ManageAccount: React.FC<ManageAccountProps> = ({ isOpen, onClose, companyS
                         </div>
                       </div>
 
-                      {/* MASTER INSPECTION HOURS SECTION - Updated with text-slate-900 for high visibility */}
+                      <div className="space-y-4">
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 px-1 flex items-center gap-2">
+                          <BellIcon size={14} className="text-blue-600" />
+                          Emergency Protocol Team SMS Notification Preference
+                        </label>
+                        <select 
+                          value={settings.notificationPreference}
+                          onChange={(e) => setSettings({...settings, notificationPreference: e.target.value as NotificationPreference})}
+                          className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none text-slate-800 font-black text-sm cursor-pointer hover:bg-slate-100 transition-all shadow-inner"
+                        >
+                          {Object.values(NotificationPreference).map(pref => (
+                            <option key={pref} value={pref}>{pref}</option>
+                          ))}
+                        </select>
+                        <p className="text-[9px] font-bold text-slate-400 italic px-1">This setting controls which technicians receive an SMS broadcast when a new job is initialized by Sarah AI.</p>
+                      </div>
+
+                      {/* MASTER INSPECTION HOURS SECTION */}
                       <div className="bg-slate-50 p-8 rounded-[2.5rem] border border-slate-200 space-y-6">
                          <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">

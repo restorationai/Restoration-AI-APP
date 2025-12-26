@@ -33,12 +33,11 @@ import {
   Bot,
   ChevronUp,
   ChevronDown,
-  /* Add Info icon import */
   Info
 } from 'lucide-react';
-import { MOCK_DISPATCH_LOGS, DEFAULT_SCHEDULE } from '../constants.tsx';
-import { Role, Status, InspectionStatus, Technician, DaySchedule, RestorationCompany, Contact, ContactType } from '../types.ts';
-import { syncTechnicianToSupabase, syncScheduleToSupabase, fetchTechniciansFromSupabase, fetchCompanySettings, syncCompanySettingsToSupabase, fetchContactsFromSupabase, syncContactToSupabase, deleteTechnicianFromSupabase } from '../lib/supabase.ts';
+import { DEFAULT_SCHEDULE } from '../constants.tsx';
+import { Role, Status, InspectionStatus, Technician, DaySchedule, RestorationCompany, Contact, ContactType, DispatchLog } from '../types.ts';
+import { syncTechnicianToSupabase, syncScheduleToSupabase, fetchTechniciansFromSupabase, fetchCompanySettings, syncCompanySettingsToSupabase, fetchContactsFromSupabase, syncContactToSupabase, deleteTechnicianFromSupabase, fetchDispatchLogs } from '../lib/supabase.ts';
 import { formatPhoneNumberInput, toDisplay } from '../utils/phoneUtils.ts';
 
 interface DispatchSchedulingProps {
@@ -67,6 +66,7 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
   const [activeSubTab, setActiveSubTab] = useState<'technicians' | 'logs' | 'routing'>('technicians');
   const [rosterView, setRosterView] = useState<'emergency' | 'inspection'>('emergency');
   const [technicians, setTechnicians] = useState<Technician[]>([]);
+  const [dispatchLogs, setDispatchLogs] = useState<DispatchLog[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -74,7 +74,9 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
   const [lastSyncTime, setLastSyncTime] = useState<string>('Never');
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   
+  // Isolated Editing State
   const [editingTech, setEditingTech] = useState<Technician | null>(null);
+  const [editingMode, setEditingMode] = useState<'emergency' | 'inspection' | null>(null);
   const [isAddingTech, setIsAddingTech] = useState(false);
   const [isAddingQuickContact, setIsAddingQuickContact] = useState(false);
   const [companyConfig, setCompanyConfig] = useState<RestorationCompany | null>(null);
@@ -120,13 +122,15 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
             .single();
           
           if (profile?.company_id) {
-            const [techData, configData, contactData] = await Promise.all([
+            const [techData, configData, contactData, logsData] = await Promise.all([
               fetchTechniciansFromSupabase(profile.company_id),
               fetchCompanySettings(profile.company_id),
-              fetchContactsFromSupabase(profile.company_id)
+              fetchContactsFromSupabase(profile.company_id),
+              fetchDispatchLogs(profile.company_id)
             ]);
             setTechnicians(techData);
             setContacts(contactData);
+            setDispatchLogs(logsData);
             if (configData) {
               setCompanyConfig(configData);
               setTransferLines({
@@ -179,27 +183,36 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
 
   const parseTime = (timeStr: string, isEnd: boolean = false) => {
     if (!timeStr || timeStr === 'None') return null;
-    const [time, period] = timeStr.split(' ');
-    let [hours, minutes] = time.split(':').map(Number);
-    if (period === 'PM' && hours !== 12) hours += 12;
-    if (period === 'AM' && hours === 12) hours = 0;
-    const val = hours * 60 + minutes;
-    if (isEnd && val === 0) return 1440;
-    return val;
+    const parts = timeStr.split(' ');
+    if (parts.length === 2) {
+      let [hours, minutes] = parts[0].split(':').map(Number);
+      const period = parts[1];
+      if (period === 'PM' && hours !== 12) hours += 12;
+      if (period === 'AM' && hours === 12) hours = 0;
+      const val = hours * 60 + minutes;
+      if (isEnd && val === 0) return 1440;
+      return val;
+    } else {
+      let [hours, minutes] = timeStr.split(':').map(Number);
+      const val = hours * 60 + minutes;
+      if (isEnd && val === 0) return 1440;
+      return val;
+    }
   };
 
-  const checkDutyStatus = (tech: Technician): { status: string; active: boolean; isOverride: boolean } => {
-    const schedule = rosterView === 'emergency' ? tech.emergencySchedule : tech.inspectionSchedule;
+  const checkDutyStatus = (tech: Technician, modeOverride?: 'emergency' | 'inspection', customSchedule?: DaySchedule[]): { status: string; active: boolean; isOverride: boolean } => {
+    const activeRosterMode = modeOverride || rosterView;
+    const schedule = customSchedule || (activeRosterMode === 'emergency' ? tech.emergencySchedule : tech.inspectionSchedule);
     const globalOverride = schedule[0]?.override || 'None';
 
-    if (globalOverride === 'Force Active') return { status: 'On Duty (Forced)', active: true, isOverride: true };
+    if (globalOverride === 'Force Active') return { status: 'Available (Forced)', active: true, isOverride: true };
     if (globalOverride === 'Force Off Duty') return { status: 'Off Duty (Forced)', active: false, isOverride: true };
 
     const currentDayStr = currentTime.toLocaleDateString('en-US', { weekday: 'short' });
     const daySched = schedule.find(s => s.day === currentDayStr);
 
     if (!daySched || !daySched.enabled) return { status: 'Off Duty', active: false, isOverride: false };
-    if (daySched.is24Hours) return { status: 'On Duty (24h)', active: true, isOverride: false };
+    if (daySched.is24Hours) return { status: 'Available (24h)', active: true, isOverride: false };
 
     const nowMinutes = currentTime.getHours() * 60 + currentTime.getMinutes();
     const startMinutes = parseTime(daySched.start);
@@ -207,47 +220,37 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
 
     if (startMinutes !== null && endMinutes !== null) {
       if (nowMinutes >= startMinutes && nowMinutes < endMinutes) {
-        return { status: 'On Duty', active: true, isOverride: false };
+        return { status: 'Available', active: true, isOverride: false };
       }
     }
     return { status: 'Off Duty', active: false, isOverride: false };
   };
 
-  const handleOpenSettings = (tech: Technician) => {
+  const handleOpenSettings = (tech: Technician, mode: 'emergency' | 'inspection' = rosterView) => {
     setEditingTech(tech);
-    const schedule = rosterView === 'emergency' ? tech.emergencySchedule : tech.inspectionSchedule;
+    setEditingMode(mode);
+    const schedule = mode === 'emergency' ? tech.emergencySchedule : tech.inspectionSchedule;
     setLocalSchedule(schedule);
-    setLocalPriorityNum(rosterView === 'emergency' ? tech.emergencyPriorityNumber : tech.inspectionPriorityNumber);
+    setLocalPriorityNum(mode === 'emergency' ? tech.emergencyPriorityNumber : tech.inspectionPriorityNumber);
     setLocalRole(tech.role);
     setLocalOverride(schedule[0]?.override || 'None');
   };
 
-  /**
-   * Final optimized delete handler.
-   */
   const handleDeleteTech = async (e: React.MouseEvent, techId: string) => {
     e.stopPropagation();
-    
-    // Close the menu immediately to ensure clean UI state
     setMenuOpenId(null);
-
     const techName = technicians.find(t => t.id === techId)?.name || "this technician";
     
-    if (!window.confirm(`PERMANENT ACTION: Are you sure you want to completely remove ${techName} from the dispatch roster? This will also purge their schedules and CRM profile.`)) {
+    if (!window.confirm(`PERMANENT ACTION: Are you sure you want to completely remove ${techName} from the dispatch roster?`)) {
       return;
     }
     
     setIsSyncing(true);
     try {
-      // 1. Permanent Removal from Supabase
       await deleteTechnicianFromSupabase(techId);
-      
-      // 2. React state filter to remove from UI
       setTechnicians(prev => prev.filter(t => t.id !== techId));
-      
-      console.log(`Success: Technician ${techId} removed from master roster.`);
     } catch (err: any) {
-      console.error("Deletion lifecycle failure:", err);
+      console.error("Deletion failure:", err);
       alert(`System Error: ${err.message}`);
     } finally {
       setIsSyncing(false);
@@ -266,9 +269,9 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
         transfer_1_name: directory[0].name, transfer_1_phone: directory[0].phone,
         transfer_2_name: directory[1].name, transfer_2_phone: directory[1].phone,
         transfer_3_name: directory[2].name, transfer_3_phone: directory[2].phone,
-        transfer_4_name: directory[4].name, transfer_4_phone: directory[4].phone,
-        transfer_5_name: directory[5].name, transfer_5_phone: directory[5].phone,
-        transfer_6_name: directory[6].name, transfer_6_phone: directory[6].phone,
+        transfer_4_name: directory[3].name, transfer_4_phone: directory[3].phone,
+        transfer_5_name: directory[4].name, transfer_5_phone: directory[4].phone,
+        transfer_6_name: directory[5].name, transfer_6_phone: directory[5].phone,
       };
       await syncCompanySettingsToSupabase(updatedConfig);
       setCompanyConfig(updatedConfig);
@@ -320,49 +323,101 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
   };
 
   const handleSaveTechSettings = async () => {
-    if (!editingTech) return;
+    if (!editingTech || !editingMode) return;
     setIsSyncing(true);
-    const isEmergency = rosterView === 'emergency';
-    const sameRoleTechs = technicians.filter(t => t.role === localRole);
-    const techStates = sameRoleTechs.map(t => ({ id: t.id, rank: t.id === editingTech.id ? localPriorityNum : (isEmergency ? t.emergencyPriorityNumber : t.inspectionPriorityNumber) }));
-    techStates.sort((a, b) => a.rank !== b.rank ? a.rank - b.rank : a.id === editingTech.id ? -1 : 1);
-    const rankMap = new Map();
-    let currentSequence = 1;
-    techStates.forEach(ts => rankMap.set(ts.id, ts.rank < 99 ? currentSequence++ : 99));
+    const isEmergency = editingMode === 'emergency';
+    
+    // 1. Re-Ranking (Waterfall) Logic
+    // Get all technicians sharing the same target role
+    const sameRoleTechs = technicians.filter(t => t.role === localRole && t.id !== editingTech.id);
+    const getPNum = (t: Technician) => isEmergency ? t.emergencyPriorityNumber : t.inspectionPriorityNumber;
+    
+    // Sort pack based on current rankings for that mode
+    sameRoleTechs.sort((a, b) => getPNum(a) - getPNum(b));
+    
+    // Create new sequence by inserting editingTech at the chosen slot
+    let reRankedPack = [...sameRoleTechs];
+    // insert at index (localPriorityNum - 1)
+    reRankedPack.splice(localPriorityNum - 1, 0, { ...editingTech, role: localRole });
+    
+    // Finalize labels and binary status mapping
     const finalSchedule = localSchedule.map(s => ({ ...s, override: localOverride }));
+    
+    // Prepare batch update objects
+    const updates = reRankedPack.map((t, idx) => {
+      const newNum = idx + 1;
+      const label = `${newNum}${newNum === 1 ? 'st' : newNum === 2 ? 'nd' : newNum === 3 ? 'rd' : 'th'} Priority`;
+      
+      // Calculate current binary status for THIS tech in THIS mode
+      const dutyState = checkDutyStatus(t, editingMode, t.id === editingTech.id ? finalSchedule : undefined);
+      const binaryStatus = dutyState.active ? 'Available' : 'Off Duty';
+      
+      const payload: any = {
+        id: t.id,
+        name: t.name,
+        role: t.id === editingTech.id ? localRole : t.role,
+        phone: t.phone,
+        clientId: t.clientId,
+        // Update the specific mode's priority and status
+        [isEmergency ? 'emergencyPriority' : 'inspectionPriority']: label,
+        [isEmergency ? 'emergencyPriorityNumber' : 'inspectionPriorityNumber']: newNum,
+        [isEmergency ? 'emergencyStatus' : 'inspectionStatus']: binaryStatus,
+        // Preserve other mode's data
+        [isEmergency ? 'inspectionPriority' : 'emergencyPriority']: isEmergency ? t.inspectionPriority : t.emergencyPriority,
+        [isEmergency ? 'inspectionPriorityNumber' : 'emergencyPriorityNumber']: isEmergency ? t.inspectionPriorityNumber : t.emergencyPriorityNumber,
+        [isEmergency ? 'inspectionStatus' : 'emergencyStatus']: isEmergency ? t.inspectionStatus : t.emergencyStatus
+      };
+      
+      return payload;
+    });
+
     try {
-      const finalR = rankMap.get(editingTech.id);
-      const label = finalR === 99 ? 'None' : `${finalR}${finalR === 1 ? 'st' : finalR === 2 ? 'nd' : finalR === 3 ? 'rd' : 'th'} Priority`;
-      await syncTechnicianToSupabase({ ...editingTech, role: localRole, emergencyPriority: isEmergency ? label : editingTech.emergencyPriority, inspectionPriority: !isEmergency ? label : editingTech.inspectionPriority, emergencyPriorityNumber: isEmergency ? finalR : editingTech.emergencyPriorityNumber, inspectionPriorityNumber: !isEmergency ? finalR : editingTech.inspectionPriorityNumber });
-      await syncScheduleToSupabase(editingTech.id, finalSchedule);
+      // Execute batch sync to database
+      for (const u of updates) {
+        await syncTechnicianToSupabase(u);
+        if (u.id === editingTech.id) {
+           await syncScheduleToSupabase(u.id, finalSchedule, editingMode);
+        }
+      }
+      
+      // Update local state by merging the re-ranked pack back into the master list
+      const updatedIds = new Set(updates.map(u => u.id));
       const updatedTechs = technicians.map(t => {
-        if (t.id === editingTech.id) return { ...t, role: localRole, [isEmergency ? 'emergencySchedule' : 'inspectionSchedule']: finalSchedule, [isEmergency ? 'emergencyPriority' : 'inspectionPriority']: label, [isEmergency ? 'emergencyPriorityNumber' : 'inspectionPriorityNumber']: finalR };
-        if (rankMap.has(t.id)) {
-            const r = rankMap.get(t.id);
-            const l = r === 99 ? 'None' : `${r}${r === 1 ? 'st' : r === 2 ? 'nd' : r === 3 ? 'rd' : 'th'} Priority`;
-            return { ...t, [isEmergency ? 'emergencyPriority' : 'inspectionPriority']: l, [isEmergency ? 'emergencyPriorityNumber' : 'inspectionPriorityNumber']: r };
+        const up = updates.find(u => u.id === t.id);
+        if (up) {
+           return {
+             ...t,
+             role: up.role,
+             [isEmergency ? 'emergencyPriority' : 'inspectionPriority']: up[isEmergency ? 'emergencyPriority' : 'inspectionPriority'],
+             [isEmergency ? 'emergencyPriorityNumber' : 'inspectionPriorityNumber']: up[isEmergency ? 'emergencyPriorityNumber' : 'inspectionPriorityNumber'],
+             [isEmergency ? 'emergencyStatus' : 'inspectionStatus']: up[isEmergency ? 'emergencyStatus' : 'inspectionStatus'],
+             [isEmergency ? 'emergencySchedule' : 'inspectionSchedule']: t.id === editingTech.id ? finalSchedule : (isEmergency ? t.emergencySchedule : t.inspectionSchedule)
+           };
         }
         return t;
       });
+
       setTechnicians(updatedTechs);
       setEditingTech(null);
-    } catch (err: any) { alert(err.message); } finally { setIsSyncing(false); }
+      setEditingMode(null);
+      setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+    } catch (err: any) {
+      alert(`Sync Failed: ${err.message}`);
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   const handleCreateNewTech = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    
-    // Explicit validation before syncing
     if (!newTechForm.name?.trim() || !newTechForm.phone?.trim()) {
       alert("Technician Name and Phone are required.");
       return;
     }
-
     if (!companyConfig) {
-      alert("System Error: Company configuration not loaded. Please try again or refresh.");
+      alert("System Error: Company configuration not loaded.");
       return;
     }
-
     setIsSyncing(true);
     try {
       const newId = `T-${Date.now()}`;
@@ -373,19 +428,18 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
         email: newTechForm.email, 
         role: newTechForm.role, 
         clientId: companyConfig.id, 
-        emergencyPriority: "1st Priority", 
-        emergencyPriorityNumber: 1, 
-        emergencyStatus: Status.ACTIVE, 
+        emergencyPriority: "99th Priority", 
+        emergencyPriorityNumber: 99, 
+        emergencyStatus: Status.OFF_DUTY, 
         emergencySchedule: [...DEFAULT_SCHEDULE], 
-        inspectionPriority: "1st Priority", 
-        inspectionPriorityNumber: 1, 
-        inspectionStatus: InspectionStatus.AVAILABLE, 
+        inspectionPriority: "99th Priority", 
+        inspectionPriorityNumber: 99, 
+        inspectionStatus: InspectionStatus.AVAILABLE as any, 
         inspectionSchedule: [...DEFAULT_SCHEDULE] 
       };
-      
       await syncTechnicianToSupabase(newTech);
-      await syncScheduleToSupabase(newTech.id, DEFAULT_SCHEDULE);
-      
+      await syncScheduleToSupabase(newTech.id, DEFAULT_SCHEDULE, 'emergency');
+      await syncScheduleToSupabase(newTech.id, DEFAULT_SCHEDULE, 'inspection');
       setTechnicians(prev => [...prev, newTech]);
       setIsAddingTech(false);
       setNewTechForm({ name: '', phone: '', email: '', role: Role.LEAD, addToEmergency: true, addToInspection: true });
@@ -413,9 +467,10 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {techs.length > 0 ? techs.map((tech) => {
+            {techs.length > 0 ? techs.sort((a,b) => (rosterView === 'emergency' ? a.emergencyPriorityNumber - b.emergencyPriorityNumber : a.inspectionPriorityNumber - b.inspectionPriorityNumber)).map((tech) => {
               const duty = checkDutyStatus(tech);
               const priorityStr = rosterView === 'emergency' ? tech.emergencyPriority : tech.inspectionPriority;
+              const priorityNum = rosterView === 'emergency' ? tech.emergencyPriorityNumber : tech.inspectionPriorityNumber;
               return (
                 <tr key={tech.id} className="hover:bg-slate-50/50 transition-colors">
                   <td className="px-10 py-6">
@@ -434,37 +489,19 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
                     <button onClick={() => handleOpenSettings(tech)} className={`inline-flex items-center gap-3 px-5 py-2 rounded-full text-[10px] font-black border uppercase tracking-[0.15em] transition-all hover:ring-4 active:scale-95 ${duty.active ? 'bg-emerald-50 text-emerald-700 border-emerald-100 hover:ring-emerald-100/50' : 'bg-slate-100 text-slate-500 border-slate-200 hover:ring-slate-200/50'}`}><div className={`w-2 h-2 rounded-full ${duty.active ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`}></div>{duty.status}</button>
                   </td>
                   <td className="px-10 py-6 text-center">
-                    <button onClick={() => handleOpenSettings(tech)} className={`px-5 py-2 rounded-xl text-xs font-black transition-all hover:scale-105 active:scale-95 shadow-sm border ${rosterView === 'emergency' ? 'bg-blue-700 text-white border-blue-100' : 'bg-emerald-700 text-white border-emerald-100'}`}>{priorityStr?.split(' ')[0] || 'Unranked'}</button>
+                    <button onClick={() => handleOpenSettings(tech)} className={`px-5 py-2 rounded-xl text-xs font-black transition-all hover:scale-105 active:scale-95 shadow-sm border ${rosterView === 'emergency' ? 'bg-blue-700 text-white border-blue-100' : 'bg-emerald-700 text-white border-emerald-100'}`}>{priorityNum === 99 ? 'None' : priorityStr?.split(' ')[0]}</button>
                   </td>
                   <td className="px-10 py-6 text-right">
                     <div className="flex items-center justify-end gap-3">
-                      <button onClick={() => handleOpenSettings(tech)} className="p-3 bg-white border border-slate-200 text-slate-400 hover:text-blue-600 hover:border-blue-200 hover:bg-blue-50 rounded-xl transition-all shadow-sm"><CalendarDays size={18} /></button>
-                      
+                      <button onClick={() => handleOpenSettings(tech)} className={`p-3 bg-white border border-slate-200 hover:bg-blue-50 rounded-xl transition-all shadow-sm ${rosterView === 'emergency' ? 'text-blue-600 border-blue-100' : 'text-emerald-600 border-emerald-100'}`}><CalendarDays size={18} /></button>
                       <div className="relative">
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setMenuOpenId(menuOpenId === tech.id ? null : tech.id);
-                          }}
-                          className={`p-3 rounded-xl transition-all ${menuOpenId === tech.id ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-400 hover:text-slate-900 hover:bg-slate-100'}`}
-                        >
-                          <MoreVertical size={18} />
-                        </button>
-                        
+                        <button onClick={(e) => { e.stopPropagation(); setMenuOpenId(menuOpenId === tech.id ? null : tech.id); }} className={`p-3 rounded-xl transition-all ${menuOpenId === tech.id ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-400 hover:text-slate-900 hover:bg-slate-100'}`}><MoreVertical size={18} /></button>
                         {menuOpenId === tech.id && (
                           <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-2xl shadow-2xl border border-slate-100 z-50 p-2 animate-in zoom-in-95 duration-200 text-left">
-                            <button 
-                              onClick={() => handleOpenSettings(tech)}
-                              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-600 hover:bg-slate-50 transition-all text-[11px] font-black uppercase tracking-widest"
-                            >
-                              <CalendarDays size={16} className="text-slate-400" /> Availability
-                            </button>
-                            <button 
-                              onClick={(e) => handleDeleteTech(e, tech.id)}
-                              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-600 hover:bg-red-50 transition-all text-[11px] font-black uppercase tracking-widest"
-                            >
-                              <Trash2 size={16} /> Delete Tech
-                            </button>
+                            <button onClick={() => handleOpenSettings(tech, 'emergency')} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-blue-600 hover:bg-slate-50 transition-all text-[11px] font-black uppercase tracking-widest"><AlertCircle size={16} /> Emergency Setup</button>
+                            <button onClick={() => handleOpenSettings(tech, 'inspection')} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-emerald-600 hover:bg-slate-50 transition-all text-[11px] font-black uppercase tracking-widest"><ShieldCheck size={16} /> Inspection Setup</button>
+                            <div className="h-px bg-slate-50 my-1 mx-2"></div>
+                            <button onClick={(e) => handleDeleteTech(e, tech.id)} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-600 hover:bg-red-50 transition-all text-[11px] font-black uppercase tracking-widest"><Trash2 size={16} /> Delete Tech</button>
                           </div>
                         )}
                       </div>
@@ -510,9 +547,9 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
             <button onClick={() => setIsAddingTech(true)} className="flex items-center gap-3 px-8 py-4 bg-slate-900 text-white rounded-2xl text-base font-black hover:bg-slate-800 shadow-2xl transition-all active:scale-95"><Plus size={24} /> Add New Technician</button>
           </div>
           <div className="space-y-12 animate-in slide-in-from-bottom-2 duration-500">
-            {renderTechTable(technicians.filter(t => t.role === Role.LEAD && (rosterView === 'emergency' ? t.emergencyPriority !== 'None' : t.inspectionPriority !== 'None')), 'Lead Technicians')}
-            {renderTechTable(technicians.filter(t => t.role === Role.ASSISTANT && (rosterView === 'emergency' ? t.emergencyPriority !== 'None' : t.inspectionPriority !== 'None')), 'Assistant Technicians')}
-            {renderTechTable(technicians.filter(t => [Role.OWNER, Role.MANAGER, Role.SUPPORT].includes(t.role) && (rosterView === 'emergency' ? t.emergencyPriority !== 'None' : t.inspectionPriority !== 'None')), 'Staff & Management')}
+            {renderTechTable(technicians.filter(t => t.role === Role.LEAD), 'Lead Technicians')}
+            {renderTechTable(technicians.filter(t => t.role === Role.ASSISTANT), 'Assistant Technicians')}
+            {renderTechTable(technicians.filter(t => [Role.OWNER, Role.MANAGER, Role.SUPPORT].includes(t.role)), 'Staff & Management')}
           </div>
         </div>
       )}
@@ -526,7 +563,6 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
               </div>
               <button onClick={handleUpdateProtocol} disabled={isSyncing} className="flex items-center gap-3 px-8 py-3.5 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl shadow-blue-600/30 hover:bg-blue-700 transition-all active:scale-95 disabled:opacity-50">{isSyncing ? <RefreshCw className="animate-spin" size={20} /> : <CircleCheck size={20} />}{isSyncing ? 'Syncing...' : 'Update Protocol'}</button>
            </div>
-
            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {[
                 { id: 'primary', label: 'PRIMARY LINE', value: transferLines.primary, border: 'border-l-[4px] border-l-blue-600' },
@@ -542,7 +578,6 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
                 </div>
               ))}
            </div>
-
            <div className="bg-white rounded-[2.5rem] shadow-sm border border-slate-100 p-10 space-y-8 relative">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
@@ -554,7 +589,6 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
                 </div>
                 <div className="px-4 py-2 bg-slate-900 rounded-xl text-white text-[9px] font-black uppercase tracking-widest flex items-center gap-2 animate-pulse"><Bot size={12} /> AI Directory Ready</div>
               </div>
-
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pt-6">
                 {directory.map((entry, idx) => (
                   <div key={idx} className="bg-slate-50/30 p-8 rounded-[2.5rem] border border-slate-100 relative group transition-all duration-300 hover:bg-white hover:shadow-2xl hover:shadow-slate-200/40">
@@ -589,7 +623,7 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
                                     <UserCheck size={14} className="text-slate-200 group-hover:text-blue-600" />
                                   </button>
                                 ))}
-                                {filteredDirectoryContacts.length === 0 && <p className="p-4 text-center text-[9px] font-bold text-slate-400">No contact found. Create one above.</p>}
+                                {filteredDirectoryContacts.length === 0 && <p className="p-4 text-center text-[9px] font-bold text-slate-400">No contact found.</p>}
                              </div>
                            )}
                         </div>
@@ -611,9 +645,6 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
                           />
                         </div>
                       </div>
-                      {entry.name && (
-                         <button onClick={() => { const newDir = [...directory]; newDir[idx] = {name:'', phone:''}; setDirectory(newDir); }} className="w-full py-2 bg-slate-50 text-[8px] font-black text-slate-300 uppercase tracking-widest rounded-xl hover:text-red-500 hover:bg-red-50 transition-all flex items-center justify-center gap-2"><Trash2 size={10} /> Clear Connection</button>
-                      )}
                     </div>
                   </div>
                 ))}
@@ -625,8 +656,48 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
 
       {activeSubTab === 'logs' && (
         <div className="bg-white rounded-[2.5rem] shadow-xl border border-slate-200 overflow-hidden animate-in slide-in-from-bottom-4 duration-500">
-          <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50"><h3 className="text-lg font-black text-slate-800 uppercase tracking-tight flex items-center gap-3"><History className="text-slate-400" /> Sarah AI Event Log</h3></div>
-          <div className="overflow-x-auto"><table className="w-full text-left"><thead><tr className="text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100 bg-slate-50/30"><th className="px-8 py-5">Timestamp</th><th className="px-8 py-5">Job Details</th><th className="px-8 py-5">Dispatch Action</th><th className="px-8 py-5">Status</th></tr></thead><tbody className="divide-y divide-slate-100">{MOCK_DISPATCH_LOGS.map(log => (<tr key={log.id} className="hover:bg-slate-50/30 transition-colors"><td className="px-8 py-6 text-xs font-bold text-slate-500">{log.timestamp}</td><td className="px-8 py-6"><p className="text-sm font-black text-slate-800">{log.lossType}</p><p className="text-[10px] font-bold text-slate-400 uppercase">{log.clientName}</p></td><td className="px-8 py-6"><p className="text-sm font-black text-blue-600">{log.assignedTech}</p><p className="text-[10px] italic text-slate-400">"{log.aiSummary}"</p></td><td className="px-8 py-6"><span className="px-3 py-1 bg-emerald-100 text-emerald-700 text-[10px] font-black uppercase rounded-lg border border-emerald-200">{log.status}</span></td></tr>))}</tbody></table></div>
+          <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+            <h3 className="text-lg font-black text-slate-800 uppercase tracking-tight flex items-center gap-3"><History className="text-slate-400" /> Sarah AI Event Log</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="text-[10px] font-black uppercase tracking-widest text-slate-400 border-b border-slate-100 bg-slate-50/30">
+                  <th className="px-8 py-5">Timestamp</th>
+                  <th className="px-8 py-5">Job Details</th>
+                  <th className="px-8 py-5">Dispatch Action</th>
+                  <th className="px-8 py-5">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {dispatchLogs.length > 0 ? dispatchLogs.map(log => (
+                  <tr key={log.id} className="hover:bg-slate-50/30 transition-colors">
+                    <td className="px-8 py-6 text-xs font-bold text-slate-500">{log.timestamp}</td>
+                    <td className="px-8 py-6">
+                      <p className="text-sm font-black text-slate-800">{log.lossType}</p>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase">{log.clientName}</p>
+                    </td>
+                    <td className="px-8 py-6">
+                      <p className="text-sm font-black text-blue-600">{log.assignedTech}</p>
+                      <p className="text-[10px] italic text-slate-400">"{log.aiSummary}"</p>
+                    </td>
+                    <td className="px-8 py-6">
+                      <span className={`px-3 py-1 text-[10px] font-black uppercase rounded-lg border ${
+                        log.status === 'Success' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-red-100 text-red-700 border-red-200'
+                      }`}>{log.status}</span>
+                    </td>
+                  </tr>
+                )) : (
+                  <tr>
+                    <td colSpan={4} className="px-8 py-20 text-center opacity-30">
+                      <History size={48} className="mx-auto mb-4 text-slate-300" />
+                      <p className="font-black text-xs uppercase tracking-widest">No dispatch events recorded yet.</p>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -685,7 +756,7 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
                   </div>
                   <div className="p-4 bg-blue-50 border border-blue-100 rounded-2xl flex items-center gap-3">
                     <Info size={16} className="text-blue-500" />
-                    <p className="text-[10px] font-bold text-blue-700 leading-tight">This member will automatically be added as a 'Team Member' contact for internal messaging.</p>
+                    <p className="text-[10px] font-bold text-blue-700 leading-tight">Member automatically added as 'Team Member' contact.</p>
                   </div>
                 </div>
                 <button type="submit" disabled={isSyncing} className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest text-[11px] shadow-xl shadow-blue-600/30 hover:bg-blue-700 transition-all flex items-center justify-center gap-3 active:scale-95 disabled:opacity-50">
@@ -697,12 +768,175 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
         </div>
       )}
 
-      {editingTech && (
+      {editingTech && editingMode && (
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-6 bg-slate-900/80 backdrop-blur-xl animate-in fade-in duration-300">
           <div className="bg-white w-full max-w-4xl rounded-[3rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh] border border-white/20">
-            <div className="px-10 py-8 bg-slate-900 text-white flex justify-between items-center"><div className="flex items-center gap-6"><div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center font-black text-2xl shadow-xl">{editingTech.name?.split(' ').map(n => n[0]).join('') || '??'}</div><div><h3 className="text-2xl font-black uppercase tracking-tight leading-none mb-1">{editingTech.name}</h3><p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">Settings for {rosterView} Mode</p></div></div><button onClick={() => setEditingTech(null)} className="p-3 hover:bg-white/10 rounded-full transition-colors"><X size={32} /></button></div>
-            <div className="flex-1 overflow-y-auto p-10 space-y-10 scrollbar-hide bg-slate-50/50"><div className="grid grid-cols-1 md:grid-cols-3 gap-6"><div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4"><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Global Status Override</label><div className="space-y-2">{['None', 'Force Active', 'Force Off Duty'].map(over => (<button key={over} onClick={() => setLocalOverride(over as any)} className={`w-full flex items-center justify-between px-5 py-3 rounded-2xl text-xs font-black transition-all border ${localOverride === over ? 'bg-blue-600 text-white border-blue-600 shadow-lg' : 'bg-slate-50 text-slate-500 border-slate-100 hover:border-blue-200'}`}>{over === 'None' ? 'Follow Schedule' : over}{localOverride === over && <Check size={16} />}</button>))}</div></div><div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4"><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Priority Ranking</label><div className="grid grid-cols-2 gap-2">{[1, 2, 3, 4, 5, 6].map(num => (<button key={num} onClick={() => setLocalPriorityNum(num)} className={`py-3 rounded-2xl text-xs font-black transition-all border ${localPriorityNum === num ? 'bg-blue-600 text-white border-blue-600 shadow-lg' : 'bg-slate-50 text-slate-500 border-slate-100 hover:border-blue-200'}`}>{num}{num === 1 ? 'st' : num === 2 ? 'nd' : num === 3 ? 'rd' : 'th'} Slot</button>))}</div></div><div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4"><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Field Role</label><div className="space-y-2">{Object.values(Role).map(role => (<button key={role} onClick={() => setLocalRole(role)} className={`w-full flex items-center justify-between px-5 py-3 rounded-2xl text-xs font-black transition-all border ${localRole === role ? 'bg-blue-600 text-white border-blue-600 shadow-lg' : 'bg-slate-50 text-slate-500 border-slate-100 hover:border-blue-200'}`}>{role} Technician{localRole === role && <Check size={16} />}</button>))}</div></div></div><div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden"><div className="px-8 py-6 bg-slate-900 text-white flex items-center justify-between"><h4 className="text-xs font-black uppercase tracking-widest flex items-center gap-3"><Calendar size={18} /> Weekly Availability Matrix</h4><p className="text-[10px] font-bold text-slate-400">Sarah AI will only dispatch during enabled hours.</p></div><div className="overflow-x-auto"><table className="w-full text-left"><thead><tr className="bg-slate-50 border-b border-slate-100 text-[10px] font-black uppercase tracking-widest text-slate-400"><th className="px-8 py-4">Day</th><th className="px-8 py-4">Status</th><th className="px-8 py-4">Shift Start</th><th className="px-8 py-4">Shift End</th><th className="px-8 py-4 text-center">24h Shift</th></tr></thead><tbody className="divide-y divide-slate-50">{localSchedule.map((s, idx) => (<tr key={s.day} className={s.enabled ? 'bg-white' : 'bg-slate-50/50'}><td className="px-8 py-5 font-black text-slate-800 text-sm">{s.day}</td><td className="px-8 py-5"><button onClick={() => { const newSched = [...localSchedule]; newSched[idx].enabled = !newSched[idx].enabled; setLocalSchedule(newSched); }} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${s.enabled ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : 'bg-slate-200 text-slate-500'}`}>{s.enabled ? 'Enabled' : 'Disabled'}</button></td><td className="px-8 py-5"><select disabled={!s.enabled || s.is24Hours} value={s.start} onChange={(e) => { const newSched = [...localSchedule]; newSched[idx].start = e.target.value; setLocalSchedule(newSched); }} className="bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-black text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-30 cursor-pointer">{TIME_SLOTS.map(t => <option key={t} value={t} className="text-slate-900">{t}</option>)}</select></td><td className="px-8 py-5"><select disabled={!s.enabled || s.is24Hours} value={s.end} onChange={(e) => { const newSched = [...localSchedule]; newSched[idx].end = e.target.value; setLocalSchedule(newSched); }} className="bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-black text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-30 cursor-pointer">{TIME_SLOTS.map(t => <option key={t} value={t} className="text-slate-900">{t}</option>)}</select></td><td className="px-8 py-5 text-center"><button disabled={!s.enabled} onClick={() => { const newSched = [...localSchedule]; newSched[idx].is24Hours = !newSched[idx].is24Hours; setLocalSchedule(newSched); }} className={`w-10 h-6 rounded-full relative transition-all ${s.is24Hours ? 'bg-blue-600' : 'bg-slate-200'} ${!s.enabled ? 'opacity-30' : ''}`}><div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${s.is24Hours ? 'left-5' : 'left-1'}`}></div></button></td></tr>))}</tbody></table></div></div></div>
-            <div className="px-10 py-8 bg-white border-t border-slate-100 flex items-center justify-between"><button onClick={() => setEditingTech(null)} className="px-8 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black uppercase text-xs tracking-widest hover:bg-slate-200 transition-all">Cancel Changes</button><button onClick={handleSaveTechSettings} disabled={isSyncing} className="px-12 py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl shadow-blue-600/30 hover:bg-blue-700 transition-all flex items-center gap-3 disabled:opacity-50">{isSyncing ? <RefreshCw className="animate-spin" size={20} /> : <Save size={20} />}{isSyncing ? 'Syncing...' : 'Deploy & Re-Rank Team'}</button></div>
+            <div className={`px-10 py-8 text-white flex justify-between items-center transition-colors ${editingMode === 'emergency' ? 'bg-slate-900' : 'bg-slate-900'}`}>
+              <div className="flex items-center gap-6">
+                <div className={`w-16 h-16 rounded-2xl flex items-center justify-center font-black text-2xl shadow-xl ${editingMode === 'emergency' ? 'bg-blue-600' : 'bg-emerald-600'}`}>
+                  {editingTech.name?.split(' ').map(n => n[0]).join('') || '??'}
+                </div>
+                <div>
+                  <h3 className="text-2xl font-black uppercase tracking-tight leading-none mb-1">{editingTech.name}</h3>
+                  <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-400">
+                    <span className={editingMode === 'emergency' ? 'text-blue-400' : 'text-emerald-400'}>
+                      {editingMode === 'emergency' ? 'Emergency Dispatch' : 'Inspection'} Setup
+                    </span>
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => { setEditingTech(null); setEditingMode(null); }} className="p-3 hover:bg-white/10 rounded-full transition-colors">
+                <X size={32} />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-10 space-y-10 scrollbar-hide bg-slate-50/50">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4">
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Global Status Override</label>
+                  <div className="space-y-2">
+                    {['None', 'Force Active', 'Force Off Duty'].map(over => (
+                      <button 
+                        key={over} 
+                        onClick={() => setLocalOverride(over as any)} 
+                        className={`w-full flex items-center justify-between px-5 py-3 rounded-2xl text-xs font-black transition-all border ${localOverride === over ? (editingMode === 'emergency' ? 'bg-blue-600 text-white border-blue-600 shadow-lg' : 'bg-emerald-600 text-white border-emerald-600 shadow-lg') : 'bg-slate-50 text-slate-500 border-slate-100 hover:border-blue-200'}`}
+                      >
+                        {over === 'None' ? 'Follow Schedule' : over}
+                        {localOverride === over && <Check size={16} />}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4">
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Priority Ranking</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[1, 2, 3, 4, 5, 6].map(num => (
+                      <button 
+                        key={num} 
+                        onClick={() => setLocalPriorityNum(num)} 
+                        className={`py-3 rounded-2xl text-xs font-black transition-all border ${localPriorityNum === num ? (editingMode === 'emergency' ? 'bg-blue-600 text-white border-blue-600 shadow-lg' : 'bg-emerald-600 text-white border-emerald-600 shadow-lg') : 'bg-slate-50 text-slate-500 border-slate-100 hover:border-blue-200'}`}
+                      >
+                        {num}{num === 1 ? 'st' : num === 2 ? 'nd' : num === 3 ? 'rd' : 'th'} Slot
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[9px] font-bold text-slate-400 italic leading-tight">Same-role members will shift down automatically.</p>
+                </div>
+
+                <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4">
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Field Role</label>
+                  <div className="space-y-2">
+                    {Object.values(Role).map(role => (
+                      <button 
+                        key={role} 
+                        onClick={() => setLocalRole(role)} 
+                        className={`w-full flex items-center justify-between px-5 py-3 rounded-2xl text-xs font-black transition-all border ${localRole === role ? (editingMode === 'emergency' ? 'bg-blue-600 text-white border-blue-600 shadow-lg' : 'bg-emerald-600 text-white border-emerald-600 shadow-lg') : 'bg-slate-50 text-slate-500 border-slate-100 hover:border-blue-200'}`}
+                      >
+                        {role} Technician
+                        {localRole === role && <Check size={16} />}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden">
+                <div className="px-8 py-6 bg-slate-900 text-white flex items-center justify-between">
+                  <h4 className="text-xs font-black uppercase tracking-widest flex items-center gap-3">
+                    <Calendar size={18} /> Weekly {editingMode === 'emergency' ? 'Emergency' : 'Inspection'} Availability
+                  </h4>
+                  <p className="text-[10px] font-bold text-slate-400">Sarah AI will only dispatch during enabled hours.</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-100 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                        <th className="px-8 py-4">Day</th>
+                        <th className="px-8 py-4">Status</th>
+                        <th className="px-8 py-4">Shift Start</th>
+                        <th className="px-8 py-4">Shift End</th>
+                        <th className="px-8 py-4 text-center">24h Shift</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50">
+                      {localSchedule.map((s, idx) => (
+                        <tr key={s.day} className={s.enabled ? 'bg-white' : 'bg-slate-50/50'}>
+                          <td className="px-8 py-5 font-black text-slate-800 text-sm">{s.day}</td>
+                          <td className="px-8 py-5">
+                            <button 
+                              onClick={() => { 
+                                const newSched = [...localSchedule]; 
+                                newSched[idx].enabled = !newSched[idx].enabled; 
+                                setLocalSchedule(newSched); 
+                              }} 
+                              className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all ${s.enabled ? (editingMode === 'emergency' ? 'bg-blue-100 text-blue-700 border border-blue-200' : 'bg-emerald-100 text-emerald-700 border border-emerald-200') : 'bg-slate-200 text-slate-500'}`}
+                            >
+                              {s.enabled ? 'Enabled' : 'Disabled'}
+                            </button>
+                          </td>
+                          <td className="px-8 py-5">
+                            <select 
+                              disabled={!s.enabled || s.is24Hours} 
+                              value={s.start} 
+                              onChange={(e) => { 
+                                const newSched = [...localSchedule]; 
+                                newSched[idx].start = e.target.value; 
+                                setLocalSchedule(newSched); 
+                              }} 
+                              className="bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-black text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-30 cursor-pointer"
+                            >
+                              {TIME_SLOTS.map(t => <option key={t} value={t} className="text-slate-900">{t}</option>)}
+                            </select>
+                          </td>
+                          <td className="px-8 py-5">
+                            <select 
+                              disabled={!s.enabled || s.is24Hours} 
+                              value={s.end} 
+                              onChange={(e) => { 
+                                const newSched = [...localSchedule]; 
+                                newSched[idx].end = e.target.value; 
+                                setLocalSchedule(newSched); 
+                              }} 
+                              className="bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-black text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-30 cursor-pointer"
+                            >
+                              {TIME_SLOTS.map(t => <option key={t} value={t} className="text-slate-900">{t}</option>)}
+                            </select>
+                          </td>
+                          <td className="px-8 py-5 text-center">
+                            <button 
+                              disabled={!s.enabled} 
+                              onClick={() => { 
+                                const newSched = [...localSchedule]; 
+                                newSched[idx].is24Hours = !newSched[idx].is24Hours; 
+                                setLocalSchedule(newSched); 
+                              }} 
+                              className={`w-10 h-6 rounded-full relative transition-all ${s.is24Hours ? (editingMode === 'emergency' ? 'bg-blue-600' : 'bg-emerald-600') : 'bg-slate-200'} ${!s.enabled ? 'opacity-30' : ''}`}
+                            >
+                              <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${s.is24Hours ? 'left-5' : 'left-1'}`}></div>
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-10 py-8 bg-white border-t border-slate-100 flex items-center justify-between">
+              <button onClick={() => { setEditingTech(null); setEditingMode(null); }} className="px-8 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black uppercase text-xs tracking-widest hover:bg-slate-200 transition-all">
+                Cancel
+              </button>
+              <button 
+                onClick={handleSaveTechSettings} 
+                disabled={isSyncing} 
+                className={`px-12 py-4 text-white rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl transition-all flex items-center gap-3 disabled:opacity-50 ${editingMode === 'emergency' ? 'bg-blue-600 shadow-blue-600/30 hover:bg-blue-700' : 'bg-emerald-600 shadow-emerald-600/30 hover:bg-emerald-700'}`}
+              >
+                {isSyncing ? <RefreshCw className="animate-spin" size={20} /> : <Save size={20} />}
+                {isSyncing ? 'Syncing...' : 'Deploy & Re-Rank Team'}
+              </button>
+            </div>
           </div>
         </div>
       )}

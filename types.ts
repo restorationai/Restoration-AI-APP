@@ -23,9 +23,9 @@ export enum DispatchStrategy {
 }
 
 export enum NotificationPreference {
-  ACTIVE_ONLY = 'Message Entire Team Active Only',
-  BOTH = 'Message Entire Team Both Active/Inactive',
-  ASSIGNED = 'Message Assigned Techs Only'
+  ASSIGNED = 'Message Assigned Techs Only',
+  ACTIVE_ONLY = 'Message All Techs Active Only',
+  BOTH = 'Message All Techs Both Active/Inactive'
 }
 
 export enum ConversationSource {

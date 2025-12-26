@@ -1,6 +1,6 @@
 
 import { createClient } from '@supabase/supabase-js';
-import { Status, InspectionStatus, Contact, ContactType, Job, PipelineStage, Conversation, Message, ConversationSource, Role, RestorationCompany, CalendarEvent, DaySchedule } from '../types.ts';
+import { Status, InspectionStatus, Contact, ContactType, Job, PipelineStage, Conversation, Message, ConversationSource, Role, RestorationCompany, CalendarEvent, DaySchedule, DispatchLog } from '../types.ts';
 import { toE164, toDisplay } from '../utils/phoneUtils.ts';
 
 const SUPABASE_URL = 'https://nyscciinkhlutvqkgyvq.supabase.co';
@@ -89,10 +89,6 @@ export const fetchCompanySettings = async (companyId: string): Promise<Restorati
       services: data.services || [],
       ghlLocationId: data.id,
       status: data.status || 'Active',
-      minimumSchedulingNotice: data.minimum_scheduling_notice ?? 4,
-      defaultInspectionDuration: data.default_inspection_duration ?? 120,
-      appointmentBufferTime: data.appointment_buffer_time ?? 30,
-      serviceAreas: data.service_areas || '',
       joinedDate: joinedDateFormatted,
       ownerName: managementContacts[0]?.name || '',
       plan: 'Pro AI',
@@ -106,6 +102,10 @@ export const fetchCompanySettings = async (companyId: string): Promise<Restorati
       inspectionSchedule: data.inspection_schedule && Array.isArray(data.inspection_schedule) && data.inspection_schedule.length > 0 
         ? data.inspection_schedule 
         : DEFAULT_CORP_SCHEDULE,
+      minimumSchedulingNotice: data.minimum_scheduling_notice ?? 4,
+      defaultInspectionDuration: data.default_inspection_duration ?? 120,
+      appointmentBufferTime: data.appointment_buffer_time ?? 30,
+      serviceAreas: data.service_areas || '',
       // Individual Directory Slots
       transfer_1_name: data.transfer_1_name, transfer_1_phone: toDisplay(data.transfer_1_phone),
       transfer_2_name: data.transfer_2_name, transfer_2_phone: toDisplay(data.transfer_2_phone),
@@ -150,7 +150,6 @@ export const syncCompanySettingsToSupabase = async (companyData: RestorationComp
     default_inspection_duration: companyData.defaultInspectionDuration,
     appointment_buffer_time: companyData.appointmentBufferTime,
     status: companyData.status,
-    /* Correct twilio_subaccount_sid mapping from camelCase companyData.twilioSubaccountSid */
     twilio_subaccount_sid: companyData.twilioSubaccountSid,
     stripe_customer_id: companyData.stripeCustomerId,
     transfer_primary: toE164(companyData.transferPrimary || ''),
@@ -179,9 +178,8 @@ export const syncCompanySettingsToSupabase = async (companyData: RestorationComp
     throw new Error(error.message);
   }
 
-  // LOUD ERROR: If RLS blocked the update, data will be empty but error will be null.
   if (!data || data.length === 0) {
-    throw new Error("Security Policy Denied: Database rejected the update. Please check if you have permission to edit this record in Supabase (missing UPDATE policy).");
+    throw new Error("Security Policy Denied: Database rejected the update. Please check if you have permission to edit this record in Supabase.");
   }
 
   return data;
@@ -193,20 +191,25 @@ export const fetchTechniciansFromSupabase = async (clientId: string) => {
     .select('*, technician_schedules (*)')
     .eq('client_id', clientId);
   if (error) throw new Error(error.message);
+  
   return (data || []).map((tech: any) => {
     const rawSchedules = tech.technician_schedules || [];
     const dayOrder = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    const formattedSchedule = dayOrder.map(day => {
-      const match = rawSchedules.find((s: any) => s.day_name === day);
-      return match ? {
-        day: match.day_name,
-        enabled: match.is_enabled,
-        is24Hours: match.is_24h,
-        start: match.start_time ? match.start_time.slice(0, 5) : '08:00',
-        end: match.end_time ? match.end_time.slice(0, 5) : '17:00',
-        override: match.override_status || 'None'
-      } : { day, enabled: true, is24Hours: false, start: '08:00', end: '17:00', override: 'None' };
-    });
+    
+    const getFormattedSchedule = (type: string) => {
+      return dayOrder.map(day => {
+        const match = rawSchedules.find((s: any) => s.day_name === day && s.schedule_type === type);
+        return match ? {
+          day: match.day_name,
+          enabled: match.is_enabled,
+          is24Hours: match.is_24h,
+          start: match.start_time ? match.start_time.slice(0, 5) : '08:00',
+          end: match.end_time ? match.end_time.slice(0, 5) : '17:00',
+          override: match.override_status || 'None'
+        } : { day, enabled: true, is24Hours: false, start: '08:00', end: '17:00', override: 'None' };
+      });
+    };
+
     return {
       id: tech.id,
       name: tech.name,
@@ -216,13 +219,13 @@ export const fetchTechniciansFromSupabase = async (clientId: string) => {
       clientId: tech.client_id,
       emergencyPriority: tech.emergency_priority,
       emergencyPriorityNumber: tech.emergency_priority_number,
-      emergencyStatus: tech.emergency_status || Status.OFF_DUTY,
-      emergencySchedule: formattedSchedule,
+      emergencyStatus: tech.emergency_status || 'Off Duty',
+      emergencySchedule: getFormattedSchedule('emergency'),
       inspectionPriority: tech.inspection_priority,
       inspectionPriorityNumber: tech.inspection_priority_number,
-      inspectionStatus: tech.inspection_status || InspectionStatus.UNAVAILABLE,
+      inspectionStatus: tech.inspection_status || 'Off Duty',
       inspectionStatusDate: tech.inspection_status_date,
-      inspectionSchedule: formattedSchedule
+      inspectionSchedule: getFormattedSchedule('inspection')
     };
   });
 };
@@ -237,29 +240,28 @@ export const syncTechnicianToSupabase = async (techData: any) => {
     role: techData.role,
     phone: e164Phone || '+15555555555',
     client_id: clientId,
-    emergency_priority: techData.emergencyPriority || techData.emergency_priority,
-    inspection_priority: techData.inspectionPriority || techData.inspection_priority,
-    emergency_priority_number: techData.emergencyPriorityNumber || techData.emergency_priority_number || 99,
-    inspection_priority_number: techData.inspectionPriorityNumber || techData.inspection_priority_number || 99
+    emergency_priority: techData.emergency_priority || techData.emergencyPriority,
+    inspection_priority: techData.inspection_priority || techData.inspectionPriority,
+    emergency_priority_number: techData.emergency_priority_number ?? techData.emergencyPriorityNumber,
+    inspection_priority_number: techData.inspection_priority_number ?? techData.inspectionPriorityNumber,
+    emergency_status: techData.emergency_status || techData.emergencyStatus || 'Off Duty',
+    inspection_status: techData.inspection_status || techData.inspectionStatus || 'Off Duty'
   };
   
-  // 1. Sync Technician Record
   const { data: techSync, error: techError } = await supabase.from('technicians').upsert({ id: techId, ...techPayload }, { onConflict: 'id' }).select();
   
   if (techError) throw new Error(techError.message);
   if (!techSync || techSync.length === 0) {
-    throw new Error("Security Policy Denied: Unable to sync technician. Check RLS policies for 'technicians' table.");
+    throw new Error("Security Policy Denied: Unable to sync technician.");
   }
 
-  // 2. Sync Corresponding Contact Record (Auto-Create Staff Member)
-  // We use the same ID or a mapped one. Let's use 'CON-TECH-ID' for consistency if possible, or just upsert by ID.
   const contactId = techId.startsWith('T-') ? techId.replace('T-', 'CON-') : `CON-${techId}`;
   const contactPayload: any = {
     id: contactId,
     name: techData.name,
     phone: e164Phone || '+15555555555',
     email: techData.email || '',
-    type: ContactType.STAFF, // Saved as 'Team Member'
+    type: ContactType.STAFF,
     role: techData.role,
     client_id: clientId,
     address: 'Internal Staff Record',
@@ -267,43 +269,28 @@ export const syncTechnicianToSupabase = async (techData: any) => {
     pipeline_stage: 'Inbound'
   };
 
-  const { error: contactError } = await supabase.from('contacts').upsert(contactPayload, { onConflict: 'id' });
-  if (contactError) {
-    console.warn("Technician linked contact sync failed:", contactError.message);
-    // Non-fatal for the technician record, but ideally shouldn't happen
-  }
-
+  await supabase.from('contacts').upsert(contactPayload, { onConflict: 'id' });
   return techSync;
 };
 
-/**
- * Robust deletion logic for technicians and linked entities.
- */
 export const deleteTechnicianFromSupabase = async (techId: string) => {
   if (!techId) throw new Error("Technician ID is required for deletion.");
-
-  // 1. Delete associated schedules first
   await supabase.from('technician_schedules').delete().eq('technician_id', techId);
-  
-  // 2. Delete linked contact record if it exists
   const contactId = techId.startsWith('T-') ? techId.replace('T-', 'CON-') : `CON-${techId}`;
   await supabase.from('contacts').delete().eq('id', contactId);
 
-  // 3. Finally delete the main technician record
   const { error, count } = await supabase
     .from('technicians')
     .delete({ count: 'exact' })
     .eq('id', techId);
 
   if (error) {
-    // If it's a foreign key error, give a friendly message
     if (error.code === '23503') {
-      throw new Error("Cannot delete technician: They are still assigned to active jobs or calendar appointments. Please unassign them first.");
+      throw new Error("Cannot delete technician: They are still assigned to active jobs or calendar appointments.");
     }
     throw new Error(error.message);
   }
 
-  // Check if anything was actually deleted (RLS check)
   if (count === 0) {
     throw new Error("Deletion failed: Record not found or database security policy prevented removal.");
   }
@@ -311,8 +298,10 @@ export const deleteTechnicianFromSupabase = async (techId: string) => {
   return true;
 };
 
-export const syncScheduleToSupabase = async (techId: string, schedule: any[]) => {
-  await supabase.from('technician_schedules').delete().eq('technician_id', techId);
+export const syncScheduleToSupabase = async (techId: string, schedule: any[], scheduleType: string = 'emergency') => {
+  // Isolated deletion by technician AND type
+  await supabase.from('technician_schedules').delete().eq('technician_id', techId).eq('schedule_type', scheduleType);
+  
   const rows = schedule.map(s => ({
     technician_id: techId,
     day_name: s.day,
@@ -320,8 +309,10 @@ export const syncScheduleToSupabase = async (techId: string, schedule: any[]) =>
     is_24h: s.is_24h || false,
     start_time: s.start || null,
     end_time: s.end || null,
-    override_status: s.override || 'None'
+    override_status: s.override || 'None',
+    schedule_type: scheduleType
   }));
+  
   const { data, error: insertError } = await supabase.from('technician_schedules').insert(rows).select();
   if (insertError) throw new Error(insertError.message);
   return data;
@@ -355,7 +346,7 @@ export const syncCalendarEventToSupabase = async (event: any, clientId: string) 
     start_time: event.startTime,
     end_time: event.endTime,
     contact_id: event.contactId,
-    job_id: event.jobId || null,
+    job_id: event.job_id || null,
     assigned_technician_ids: event.assigned_technician_ids,
     status: event.status,
     location: event.location,
@@ -366,9 +357,6 @@ export const syncCalendarEventToSupabase = async (event: any, clientId: string) 
   }, { onConflict: 'id' }).select();
   
   if (error) throw new Error(error.message);
-  if (!data || data.length === 0) {
-    throw new Error("Security Policy Denied: Unable to sync event. Check RLS policies for 'calendar_events' table.");
-  }
   return data;
 };
 
@@ -424,9 +412,6 @@ export const syncContactToSupabase = async (contact: Contact, clientId: string) 
   }, { onConflict: 'id' }).select();
   
   if (error) throw new Error(error.message);
-  if (!data || data.length === 0) {
-    throw new Error("Security Policy Denied: Unable to sync contact. Check RLS policies for 'contacts' table.");
-  }
   return data;
 };
 
@@ -457,9 +442,6 @@ export const fetchJobsFromSupabase = async (clientId: string): Promise<Job[]> =>
   }));
 };
 
-/**
- * Corrected custom_fields: job.customFields below to match Job interface in types.ts
- */
 export const syncJobToSupabase = async (job: Job, clientId: string) => {
   const { data, error } = await supabase.from('jobs').upsert({
     id: job.id,
@@ -478,9 +460,6 @@ export const syncJobToSupabase = async (job: Job, clientId: string) => {
   }, { onConflict: 'id' }).select();
   
   if (error) throw new Error(error.message);
-  if (!data || data.length === 0) {
-    throw new Error("Security Policy Denied: Unable to sync job file. Check RLS policies for 'jobs' table.");
-  }
   return data;
 };
 
@@ -490,7 +469,6 @@ export const fetchConversations = async (companyId: string): Promise<Conversatio
     .select('*')
     .eq('company_id', companyId)
     .order('last_message_at', { ascending: false });
-
   if (error) throw error;
   
   return (data || []).map(c => ({
@@ -515,7 +493,6 @@ export const fetchConversations = async (companyId: string): Promise<Conversatio
 
 export const createConversation = async (contactId: string, companyId: string, source: ConversationSource = ConversationSource.SMS): Promise<Conversation> => {
   const now = new Date().toISOString();
-  
   const { data: contact } = await supabase.from('contacts').select('type').eq('id', contactId).single();
   const category = contact?.type === ContactType.STAFF ? 'internal_chat' : 'company_inbox';
 
@@ -536,7 +513,6 @@ export const createConversation = async (contactId: string, companyId: string, s
     .single();
 
   if (error) throw error;
-
   return {
     id: String(data.id),
     contactId: data.contact_id,
@@ -560,7 +536,6 @@ export const fetchMessages = async (conversationId: string): Promise<Message[]> 
     .select('*')
     .eq('conversation_id', conversationId)
     .order('created_at', { ascending: true });
-
   if (error) throw error;
 
   return (data || []).map(m => ({
@@ -582,9 +557,6 @@ export const fetchMessages = async (conversationId: string): Promise<Message[]> 
   }));
 };
 
-/**
- * Fixed type error in sendMessageToDb by removing non-existent media_url property access on Message type.
- */
 export const sendMessageToDb = async (msg: Partial<Message>, conversationId: string, companyId: string) => {
   const { data: convData } = await supabase
     .from('conversations')
@@ -592,7 +564,7 @@ export const sendMessageToDb = async (msg: Partial<Message>, conversationId: str
     .eq('id', conversationId)
     .single();
 
-  if (!convData) throw new Error("Conversation sync error: Routing context not found.");
+  if (!convData) throw new Error("Conversation sync error.");
 
   const [contactRes, companyRes] = await Promise.all([
     supabase.from('contacts').select('phone').eq('id', convData.contact_id).single(),
@@ -620,16 +592,38 @@ export const sendMessageToDb = async (msg: Partial<Message>, conversationId: str
         })
       });
 
-      if (!response.ok) {
-        throw new Error(`Master Gateway Offline: ${response.statusText}`);
-      }
-      
+      if (!response.ok) throw new Error(`Gateway Offline.`);
       return { success: true };
     } catch (e: any) {
-      console.error("Master Webhook Signal Failure:", e);
+      console.error("Signal Failure:", e);
       throw e;
     }
   }
 
-  throw new Error("Master Outbound Webhook is not configured.");
+  throw new Error("Webhook not configured.");
+};
+
+export const fetchDispatchLogs = async (clientId: string): Promise<DispatchLog[]> => {
+  try {
+    const { data, error } = await supabase
+      .from('dispatch_logs')
+      .select('*')
+      .eq('client_id', clientId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    return (data || []).map((log: any) => ({
+      id: log.id,
+      timestamp: new Date(log.created_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }),
+      clientName: log.client_name,
+      lossType: log.loss_type,
+      assignedTech: log.assigned_tech_name || 'Automated Relay',
+      status: log.status,
+      aiSummary: log.ai_summary
+    }));
+  } catch (err) {
+    console.error("fetchDispatchLogs error:", err);
+    return [];
+  }
 };
