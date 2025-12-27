@@ -20,7 +20,6 @@ import {
   Stethoscope,
   UserCheck,
   Phone,
-  // Added missing Smartphone icon import
   Smartphone,
   MessageSquare,
   Save,
@@ -47,9 +46,9 @@ import {
   Trash2,
   Users
 } from 'lucide-react';
-import { PipelineStage, Job, Contact, JobNote, GHLCustomFields, CalendarEvent, ContactType } from '../types.ts';
-import { calculateGPP } from '../utils/psychro.ts';
-import { fetchJobsFromSupabase, syncJobToSupabase, getCurrentUser, fetchContactsFromSupabase, fetchCalendarEvents } from '../lib/supabase.ts';
+import { PipelineStage, Job, Contact, JobNote, GHLCustomFields, CalendarEvent, ContactType } from '../types';
+import { calculateGPP } from '../utils/psychro';
+import { fetchJobsFromSupabase, syncJobToSupabase, getCurrentUser, fetchContactsFromSupabase, fetchCalendarEvents } from '../lib/supabase';
 
 const STAGES: PipelineStage[] = ['Inbound', 'Dispatching', 'In Progress', 'Completion', 'Invoiced'];
 
@@ -179,7 +178,7 @@ const JobPipeline: React.FC = () => {
       lossType: briefingForm.lossType || selectedJob.lossType,
       urgency: briefingForm.urgency || selectedJob.urgency,
       estimatedValue: briefingForm.estimatedValue ?? selectedJob.estimatedValue,
-      propertyManagerId: briefingForm.propertyManagerId,
+      propertyManagerId: briefingForm.propertyManagerId || undefined,
       customFields: { ...selectedJob.customFields, ...briefingForm.customFields }
     };
 
@@ -241,7 +240,6 @@ const JobPipeline: React.FC = () => {
     e.preventDefault();
     if (!companyId) return;
 
-    // Constraint 1: One Open Job per Primary Contact
     const openJob = jobs.find(j => j.contactId === newJobForm.contactId && j.status === 'Open' && j.id !== newJobForm.id);
     if (openJob) {
       alert(`This contact already has an active project ("${openJob.title}"). You must close that project before opening a new file for this client.`);
@@ -260,7 +258,7 @@ const JobPipeline: React.FC = () => {
       estimatedValue: Number(newJobForm.estimatedValue) || 0,
       timestamp: newJobForm.timestamp || new Date().toLocaleDateString(),
       contactId: newJobForm.contactId || '',
-      propertyManagerId: newJobForm.propertyManagerId || null,
+      propertyManagerId: newJobForm.propertyManagerId || undefined,
       customFields: newJobForm.customFields,
       notes: newJobForm.notes || [],
       readings: newJobForm.readings || [],
@@ -371,7 +369,6 @@ const JobPipeline: React.FC = () => {
         </div>
       )}
 
-      {/* Selected Job Drawer/Overlay - Expanded to 80% */}
       {selectedJob && (
         <div className="fixed inset-0 z-[150] flex justify-end bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300">
           <div className="w-[80vw] bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-right-10 duration-500">
@@ -506,66 +503,11 @@ const JobPipeline: React.FC = () => {
                                 <input type="text" value={briefingForm.customFields?.claim_number || ''} onChange={e => setBriefingForm({...briefingForm, customFields: {...briefingForm.customFields, claim_number: e.target.value}})} className="w-full px-5 py-4 bg-white border border-slate-200 rounded-2xl text-sm font-bold shadow-sm outline-none focus:ring-4 focus:ring-blue-600/5 transition-all" />
                               </div>
                            </div>
-                           <div>
-                              <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Property Type</label>
-                              <select value={briefingForm.customFields?.property_type || 'Residential'} onChange={e => setBriefingForm({...briefingForm, customFields: {...briefingForm.customFields, property_type: e.target.value}})} className="w-full px-5 py-4 bg-white border border-slate-200 rounded-2xl text-sm font-bold shadow-sm outline-none focus:ring-4 focus:ring-blue-600/5 transition-all">
-                                <option value="Residential">Residential</option>
-                                <option value="Commercial">Commercial</option>
-                                <option value="Industrial">Industrial</option>
-                                <option value="Multi-Family">Multi-Family</option>
-                              </select>
-                           </div>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-                        <div className="space-y-6">
-                           <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2 px-1"><Bot size={14} /> AI Context & Damage Summary</h5>
-                           <div className="space-y-4">
-                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block px-1">Sarah AI Transcription/Summary</label>
-                              <textarea 
-                                value={briefingForm.customFields?.incident_summary || ''}
-                                onChange={e => setBriefingForm({...briefingForm, customFields: {...briefingForm.customFields, incident_summary: e.target.value}})}
-                                className="w-full min-h-[160px] p-6 bg-white border border-slate-200 rounded-[2rem] text-sm font-bold text-slate-800 outline-none focus:ring-4 focus:ring-blue-600/5 transition-all shadow-sm"
-                              />
-                           </div>
-                           <div className="grid grid-cols-2 gap-4">
-                              <div>
-                                <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Source of Damage</label>
-                                <input type="text" value={briefingForm.customFields?.source_of_damage || ''} onChange={e => setBriefingForm({...briefingForm, customFields: {...briefingForm.customFields, source_of_damage: e.target.value}})} className="w-full px-5 py-4 bg-white border border-slate-200 rounded-2xl text-sm font-bold shadow-sm outline-none focus:ring-4 focus:ring-blue-600/5 transition-all" />
-                              </div>
-                              <div>
-                                <label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Areas Affected</label>
-                                <input type="text" value={briefingForm.customFields?.areas_affected || ''} onChange={e => setBriefingForm({...briefingForm, customFields: {...briefingForm.customFields, areas_affected: e.target.value}})} className="w-full px-5 py-4 bg-white border border-slate-200 rounded-2xl text-sm font-bold shadow-sm outline-none focus:ring-4 focus:ring-blue-600/5 transition-all" />
-                              </div>
-                           </div>
-                        </div>
-
-                        <div className="space-y-6">
-                           <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2 px-1"><Home size={14} /> Tenant / Occupant Tracking</h5>
-                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                              <div className="space-y-2">
-                                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Full Name</label>
-                                <input type="text" value={briefingForm.customFields?.tenant_name || ''} onChange={e => setBriefingForm({...briefingForm, customFields: {...briefingForm.customFields, tenant_name: e.target.value}})} className="w-full px-5 py-4 bg-white border border-slate-200 rounded-2xl text-sm font-bold shadow-sm outline-none focus:ring-4 focus:ring-blue-600/5 transition-all" placeholder="Tenant Name" />
-                              </div>
-                              <div className="space-y-2">
-                                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Direct Phone</label>
-                                <input type="text" value={briefingForm.customFields?.tenant_phone || ''} onChange={e => setBriefingForm({...briefingForm, customFields: {...briefingForm.customFields, tenant_phone: e.target.value}})} className="w-full px-5 py-4 bg-white border border-slate-200 rounded-2xl text-sm font-bold shadow-sm outline-none focus:ring-4 focus:ring-blue-600/5 transition-all" placeholder="(555) 555-5555" />
-                              </div>
-                           </div>
-                           <div className="p-6 bg-emerald-50 rounded-[2rem] border border-emerald-100 mt-4 flex items-start gap-4">
-                              <Info size={20} className="text-emerald-500 shrink-0" />
-                              <div>
-                                <p className="text-[11px] font-black text-emerald-900 uppercase tracking-tight">Manual Edit Confirmation</p>
-                                <p className="text-[10px] font-bold text-emerald-700 leading-tight mt-1">Committing these changes will update the permanent file and trigger any downstream n8n field updates.</p>
-                              </div>
-                           </div>
                         </div>
                       </div>
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
-                      {/* Left Column: Sarah AI Summary & Source */}
                       <div className="space-y-8">
                          <div className="space-y-4">
                           <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block px-1 flex items-center gap-2"><Bot size={14} className="text-purple-600" /> Sarah AI Incident Triage Summary</label>
@@ -592,7 +534,6 @@ const JobPipeline: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* Linked Property Manager Display */}
                         <div className="space-y-6 pt-4">
                            <div className="flex items-center justify-between px-1">
                             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Building size={14} className="text-slate-400" /> Linked Property Manager / Contact</label>
@@ -603,19 +544,18 @@ const JobPipeline: React.FC = () => {
                                  <Building size={24} />
                                </div>
                                <div>
-                                 <p className="font-black text-slate-800 text-lg tracking-tight">{getContact(selectedJob.propertyManagerId)?.name || 'No Partner Linked'}</p>
+                                 <p className="font-black text-slate-800 text-lg tracking-tight">{getContact(selectedJob.propertyManagerId || '')?.name || 'No Partner Linked'}</p>
                                  <div className="flex items-center gap-2 mt-0.5">
                                    <Smartphone size={12} className="text-slate-300" />
-                                   <span className="text-xs font-bold text-slate-400">{getContact(selectedJob.propertyManagerId)?.phone || 'Direct line not provided'}</span>
+                                   <span className="text-xs font-bold text-slate-400">{getContact(selectedJob.propertyManagerId || '')?.phone || 'Direct line not provided'}</span>
                                  </div>
                                </div>
                             </div>
-                            {getContact(selectedJob.propertyManagerId)?.phone && <button className="p-3 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-600 hover:text-white transition-all"><Phone size={20} fill="currentColor" /></button>}
+                            {getContact(selectedJob.propertyManagerId || '')?.phone && <button className="p-3 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-600 hover:text-white transition-all"><Phone size={20} fill="currentColor" /></button>}
                           </div>
                         </div>
                       </div>
 
-                      {/* Right Column: Key Contacts & Tenant Info */}
                       <div className="space-y-8">
                         <div className="bg-slate-50/50 p-8 rounded-[3rem] border border-slate-100 grid grid-cols-2 gap-8">
                           <DataItem label="Job Title" value={selectedJob.title} icon={Tag} />
@@ -627,189 +567,9 @@ const JobPipeline: React.FC = () => {
                           <DataItem label="Property Type" value={selectedJob.customFields?.property_type} icon={MapPin} />
                           <DataItem label="Revenue Est." value={`$${selectedJob.estimatedValue?.toLocaleString() || '0.00'}`} icon={DollarSign} />
                         </div>
-
-                        <div className="space-y-6">
-                          <div className="flex items-center justify-between px-1">
-                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Home size={14} /> Associated Tenant / On-Site Occupant</label>
-                            <span className="text-[9px] font-black text-slate-300 uppercase">Emergency Field Context</span>
-                          </div>
-                          <div className="p-8 bg-white border-2 border-slate-50 rounded-[2.5rem] shadow-sm flex items-center justify-between">
-                            <div className="flex items-center gap-5">
-                               <div className="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-400">
-                                 <User size={24} />
-                               </div>
-                               <div>
-                                 <p className="font-black text-slate-800 text-lg tracking-tight">{selectedJob.customFields?.tenant_name || 'No Tenant Linked'}</p>
-                                 <div className="flex items-center gap-2 mt-0.5">
-                                   <Smartphone size={12} className="text-slate-300" />
-                                   <span className="text-xs font-bold text-slate-400">{selectedJob.customFields?.tenant_phone || 'Direct line not provided'}</span>
-                                 </div>
-                               </div>
-                            </div>
-                            {selectedJob.customFields?.tenant_phone && <button className="p-3 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-600 hover:text-white transition-all"><Phone size={20} fill="currentColor" /></button>}
-                          </div>
-                        </div>
                       </div>
                     </div>
                   )}
-                </div>
-              )}
-
-              {activeJobTab === 'appointments' && (
-                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-8">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="text-2xl font-black text-slate-800 tracking-tight">Project Timeline & Appointments</h4>
-                      <p className="text-sm font-bold text-slate-400 mt-1">Chronological dispatch events and scheduled site visits.</p>
-                    </div>
-                  </div>
-
-                  <div className="space-y-4">
-                    {relatedEvents.length > 0 ? relatedEvents.map(event => (
-                      <div key={event.id} className={`p-8 rounded-[2.5rem] border flex items-center justify-between bg-white shadow-sm hover:shadow-md transition-all ${event.type === 'emergency' ? 'border-blue-100' : 'border-emerald-100'}`}>
-                        <div className="flex items-center gap-6">
-                           <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${event.type === 'emergency' ? 'bg-blue-600 text-white' : 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20'}`}>
-                             {event.type === 'emergency' ? <ShieldCheck size={28} /> : <CalendarDays size={28} />}
-                           </div>
-                           <div>
-                             <h5 className="font-black text-slate-800 text-lg tracking-tight">{event.title}</h5>
-                             <div className="flex items-center gap-4 mt-1 text-slate-400">
-                               <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest"><Clock size={12} /> {new Date(event.startTime).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</div>
-                               <span className="w-1 h-1 bg-slate-200 rounded-full"></span>
-                               <div className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest"><MapPin size={12} /> {event.location.split(',')[0]}</div>
-                             </div>
-                           </div>
-                        </div>
-                        <div className="flex items-center gap-6">
-                           <div className="text-right">
-                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Squad Link</p>
-                             <div className="flex -space-x-2">
-                               {event.assignedTechnicianIds.map(tid => (
-                                 <div key={tid} className="w-8 h-8 rounded-full border-2 border-white bg-slate-100 flex items-center justify-center text-[10px] font-black text-slate-400 shadow-sm" title={tid}>
-                                   {tid.charAt(0)}
-                                 </div>
-                               ))}
-                             </div>
-                           </div>
-                           <div className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border ${event.status === 'completed' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-blue-50 text-blue-600 border-blue-100'}`}>
-                             {event.status}
-                           </div>
-                        </div>
-                      </div>
-                    )) : (
-                      <div className="py-20 bg-slate-50/50 border-2 border-dashed border-slate-100 rounded-[3rem] flex flex-col items-center justify-center text-slate-300">
-                         <Calendar size={80} className="mb-6 opacity-10" />
-                         <p className="text-xs font-black uppercase tracking-[0.4em] opacity-40">No Appointments Recorded</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {activeJobTab === 'fieldwork' && (
-                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-12">
-                   <div className="flex items-center justify-between">
-                     <div>
-                       <h4 className="text-2xl font-black text-slate-800 tracking-tight">Psychrometric Logs</h4>
-                       <p className="text-sm font-bold text-slate-400 mt-1">Real-time drying progress tracking and equipment audit.</p>
-                     </div>
-                     <button className="flex items-center gap-3 px-8 py-3.5 bg-slate-900 text-white rounded-[1.5rem] font-black uppercase text-[11px] tracking-widest shadow-xl hover:bg-slate-800 transition-all active:scale-95"><Plus size={18} /> New Daily Reading</button>
-                   </div>
-                   <div className="border-2 border-slate-50 rounded-[3rem] overflow-hidden shadow-2xl">
-                      <table className="w-full text-left">
-                        <thead className="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">
-                          <tr>
-                            <th className="px-10 py-6">Service Area / Room</th>
-                            <th className="px-10 py-6 text-center">Temp / RH %</th>
-                            <th className="px-10 py-6 text-center">GPP (Grains)</th>
-                            <th className="px-10 py-6 text-right">Equipment Status</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-50">
-                          {(selectedJob.readings || []).length > 0 ? (selectedJob.readings || []).map(r => (
-                            <tr key={r.id} className="hover:bg-slate-50/30 transition-colors">
-                              <td className="px-10 py-6 font-black text-slate-800 text-base">{r.room}</td>
-                              <td className="px-10 py-6 text-center text-sm font-bold text-slate-500"><span className="text-slate-800">{r.temp}°F</span> <span className="mx-2 text-slate-200">|</span> <span className="text-slate-800">{r.rh}%</span></td>
-                              <td className="px-10 py-6 text-center font-black text-lg text-blue-600">{r.gpp || calculateGPP(r.temp, r.rh)}</td>
-                              <td className="px-10 py-6 text-right"><span className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border ${r.equipmentActive ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-slate-100 text-slate-400 border-slate-200'}`}>{r.equipmentActive ? 'System Active' : 'Offline'}</span></td>
-                            </tr>
-                          )) : (
-                            <tr>
-                              <td colSpan={4} className="px-10 py-32 text-center">
-                                <div className="flex flex-col items-center justify-center opacity-20">
-                                  <Droplets size={64} className="text-slate-300 mb-4" />
-                                  <p className="font-black text-xs uppercase tracking-widest">No Moisture Readings Recorded</p>
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                   </div>
-                </div>
-              )}
-
-              {activeJobTab === 'notes' && (
-                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 h-full flex flex-col gap-10">
-                  <div className="space-y-6">
-                    <h4 className="text-2xl font-black text-slate-800 tracking-tight flex items-center gap-4"><MessageSquare size={28} className="text-blue-600" /> Project Notes</h4>
-                    <div className="relative group">
-                      <textarea 
-                        value={newNoteText}
-                        onChange={(e) => setNewNoteText(e.target.value)}
-                        placeholder="Type a project update for the whole team and n8n audit..."
-                        className="w-full bg-slate-50 border-2 border-slate-100 rounded-[3rem] p-10 text-lg font-bold outline-none focus:ring-12 focus:ring-blue-600/5 focus:border-blue-600/20 transition-all resize-none min-h-[180px] shadow-inner"
-                        onKeyDown={(e) => { if (e.key === 'Enter' && e.ctrlKey) { handleAddNote(); } }}
-                      />
-                      <button 
-                        onClick={handleAddNote}
-                        disabled={!newNoteText.trim() || isSaving}
-                        className="absolute bottom-6 right-6 bg-blue-600 text-white p-5 rounded-[2rem] shadow-2xl shadow-blue-600/40 hover:bg-blue-700 transition-all active:scale-95 disabled:opacity-30"
-                      >
-                        {isSaving ? <Loader2 size={24} className="animate-spin" /> : <Send size={24} />}
-                      </button>
-                    </div>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-6">Pro-tip: CTRL + Enter to broadcast note.</p>
-                  </div>
-
-                  <div className="space-y-8">
-                    {(selectedJob.notes && selectedJob.notes.length > 0) ? selectedJob.notes.map((note) => (
-                      <div key={note.id} className="bg-white border-2 border-slate-50 p-10 rounded-[3.5rem] shadow-sm relative group hover:shadow-xl transition-all hover:border-blue-50">
-                        <div className="flex justify-between items-start mb-8">
-                          <div className="flex items-center gap-5">
-                             <div className="w-14 h-14 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center font-black text-base uppercase shadow-inner border border-blue-100">
-                                {(note.author || '??').split(' ').map(n => n[0]).join('')}
-                             </div>
-                             <div>
-                               <p className="text-lg font-black text-slate-800">{note.author || 'Unknown Staff'}</p>
-                               <div className="flex items-center gap-3 mt-1 text-slate-400">
-                                 <Calendar size={14} />
-                                 <span className="text-[11px] font-bold uppercase tracking-widest">{new Date(note.timestamp).toLocaleDateString()} • {new Date(note.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                               </div>
-                             </div>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            {note.isAiGenerated && <span className="bg-purple-100 text-purple-600 text-[10px] font-black uppercase px-4 py-1.5 rounded-full flex items-center gap-2 border border-purple-200"><Bot size={14} /> AI Activity Log</span>}
-                            {!isSaving && (
-                              <button 
-                                onClick={() => handleDeleteNote(note.id)}
-                                className="p-3 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all opacity-0 group-hover:opacity-100"
-                                title="Delete Note"
-                              >
-                                <Trash2 size={18} />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                        <p className="text-lg font-bold text-slate-600 leading-relaxed whitespace-pre-wrap px-2">{note.content}</p>
-                      </div>
-                    )) : (
-                      <div className="p-32 bg-slate-50/50 border-2 border-dashed border-slate-100 rounded-[4rem] flex flex-col items-center justify-center text-slate-300">
-                        <MessageSquare size={80} className="mb-6 opacity-10" />
-                        <p className="text-xs font-black uppercase tracking-[0.4em] opacity-40">No Project History Detected</p>
-                      </div>
-                    )}
-                  </div>
                 </div>
               )}
             </div>
@@ -830,90 +590,6 @@ const JobPipeline: React.FC = () => {
                  )}
               </div>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* New Job Modal */}
-      {isNewJobModalOpen && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
-          <div className="bg-white w-full max-w-xl rounded-[3rem] shadow-2xl overflow-hidden flex flex-col border border-white/20 my-auto">
-            <div className="px-10 py-8 bg-slate-900 text-white flex justify-between items-center flex-shrink-0">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg"><Plus size={24} /></div>
-                <h3 className="text-xl font-black uppercase tracking-tight">{newJobForm.id ? 'Modify Pipeline Job' : 'Create New Pipeline Job'}</h3>
-              </div>
-              <button onClick={() => setIsNewJobModalOpen(false)} className="p-3 hover:bg-white/10 rounded-full transition-colors"><X size={28} /></button>
-            </div>
-
-            <form onSubmit={handleSaveJob} className="p-10 space-y-6 overflow-y-auto scrollbar-hide max-h-[75vh]">
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Job Title / Project Name</label>
-                  <input required type="text" value={newJobForm.title || ''} onChange={e => setNewJobForm({...newJobForm, title: e.target.value})} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm transition-all" placeholder="e.g. Miller Residence Water Damage" />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Primary Owner / Contact <span className="text-red-500 font-black">*</span></label>
-                  <select required value={newJobForm.contactId || ''} onChange={e => setNewJobForm({...newJobForm, contactId: e.target.value})} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm cursor-pointer transition-all">
-                    <option value="">Select Primary Owner...</option>
-                    {contacts.filter(c => c.type !== ContactType.PROPERTY_MANAGER && c.type !== ContactType.STAFF).map(c => (
-                      <option key={c.id} value={c.id}>{c.name} ({c.type})</option>
-                    ))}
-                  </select>
-                  <p className="text-[9px] text-slate-400 mt-1.5 italic">Property Managers cannot be primary owners. Assign them in the Management field below.</p>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Linked Property Manager / Referral Partner</label>
-                  <select value={newJobForm.propertyManagerId || ''} onChange={e => setNewJobForm({...newJobForm, propertyManagerId: e.target.value})} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm cursor-pointer transition-all">
-                    <option value="">No Linked Partner</option>
-                    {contacts.filter(c => c.type === ContactType.PROPERTY_MANAGER || c.type === ContactType.REFERRAL_PARTNER).map(c => (
-                      <option key={c.id} value={c.id}>{c.name} ({c.company || c.type})</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Pipeline Stage</label>
-                    <select value={newJobForm.stage} onChange={e => setNewJobForm({...newJobForm, stage: e.target.value as PipelineStage})} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm cursor-pointer">
-                      {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Urgency</label>
-                    <select value={newJobForm.urgency} onChange={e => setNewJobForm({...newJobForm, urgency: e.target.value as any})} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm cursor-pointer">
-                      <option value="Low">Low</option>
-                      <option value="Medium">Medium</option>
-                      <option value="High">High</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Loss Category</label>
-                  <input type="text" value={newJobForm.lossType || ''} onChange={e => setNewJobForm({...newJobForm, lossType: e.target.value})} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm" placeholder="e.g. Water Damage (Category 3)" />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Estimated Revenue ($)</label>
-                  <input type="number" value={newJobForm.estimatedValue || 0} onChange={e => setNewJobForm({...newJobForm, estimatedValue: Number(e.target.value)})} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm" placeholder="0.00" />
-                </div>
-              </div>
-
-              <div className="pt-4 flex gap-4 sticky bottom-0 bg-white/90 backdrop-blur-sm pb-2">
-                <button type="button" onClick={() => setIsNewJobModalOpen(false)} className="flex-1 py-4 bg-slate-100 text-slate-500 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-slate-200 transition-all">Cancel</button>
-                <button 
-                  type="submit" 
-                  disabled={isSaving}
-                  className="flex-[2] py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl shadow-blue-600/30 hover:bg-blue-700 transition-all active:scale-95 flex items-center justify-center gap-3 disabled:opacity-50"
-                >
-                  {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                  {isSaving ? 'Syncing...' : 'Sync Pipeline Entry'}
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}

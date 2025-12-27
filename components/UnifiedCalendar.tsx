@@ -48,6 +48,9 @@ import { fetchCalendarEvents, syncCalendarEventToSupabase, fetchTechniciansFromS
 import { formatPhoneNumberInput } from '../utils/phoneUtils';
 import ManageAccount from './ManageAccount';
 
+type CalendarMode = 'all' | 'emergency' | 'inspection';
+type ViewType = 'day' | 'week' | 'month';
+
 const generateUUID = () => {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
     var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
@@ -55,7 +58,6 @@ const generateUUID = () => {
   });
 };
 
-// Fix: Add export keyword
 export const UnifiedCalendar: React.FC = () => {
   const [viewMode, setViewMode] = useState<CalendarMode>('all');
   const [viewType, setViewType] = useState<ViewType>('day');
@@ -103,11 +105,8 @@ export const UnifiedCalendar: React.FC = () => {
   });
 
   // UI States
-  const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
-  const [isTimePickerOpen, setIsTimePickerOpen] = useState(false);
   const [isContactPickerOpen, setIsContactPickerOpen] = useState(false);
   const [contactSearch, setContactSearch] = useState('');
-  const [pickerViewDate, setPickerViewDate] = useState(new Date());
 
   const loadData = async () => {
     try {
@@ -188,20 +187,14 @@ export const UnifiedCalendar: React.FC = () => {
   };
 
   const isCompanyOpen = (date: Date, hour: number) => {
-    // Emergency is always bookable regardless of business hours (staff dependent)
     if (viewMode === 'emergency') return true;
-    
     if (!companyConfig?.inspectionSchedule) return true;
-    
     const dayName = getDayName(date);
     const daySched = companyConfig.inspectionSchedule.find((s: any) => s.day === dayName);
-    
     if (!daySched || !daySched.enabled) return false;
-    
     const totalMinutes = hour * 60;
     const startMinutes = parseTimeValue(daySched.start);
     const endMinutes = parseTimeValue(daySched.end, true);
-    
     if (startMinutes === null || endMinutes === null) return false;
     return totalMinutes >= startMinutes && totalMinutes < endMinutes;
   };
@@ -210,18 +203,14 @@ export const UnifiedCalendar: React.FC = () => {
     const [h, m] = bookingTime.split(':').map(Number);
     const start = new Date(bookingDate);
     start.setHours(h, m, 0, 0);
-    
     const duration = companyConfig?.defaultInspectionDuration || 120;
     const buffer = companyConfig?.appointmentBufferTime || 30;
     const end = new Date(start.getTime() + (duration + buffer) * 60000);
-
     return events.find(event => {
       if (event.id === currentEventId) return false;
       if (!event.assignedTechnicianIds.includes(techId)) return false;
-      
       const eventStart = new Date(event.startTime);
       const eventEnd = new Date(new Date(event.endTime).getTime() + buffer * 60000);
-      
       return (start < eventEnd) && (end > eventStart);
     });
   };
@@ -236,7 +225,6 @@ export const UnifiedCalendar: React.FC = () => {
 
   const getCapacityDetails = (date: Date, hour?: number) => {
     const timeStr = hour !== undefined ? `${hour.toString().padStart(2, '0')}:00` : "00:00";
-    
     const onDutyTechs = technicians.filter(t => {
       if (hour !== undefined) return isTechOnDuty(t, date, timeStr);
       const dayName = getDayName(date);
@@ -244,19 +232,14 @@ export const UnifiedCalendar: React.FC = () => {
       const sched = mode === 'emergency' ? t.emergencySchedule : t.inspectionSchedule;
       return sched.find(s => s.day === dayName)?.enabled;
     });
-
     const assignedCount = events.filter(e => {
       const start = new Date(e.startTime);
       const sameDay = start.toDateString() === date.toDateString();
       if (hour !== undefined) return sameDay && start.getHours() === hour;
       return sameDay;
     }).length;
-
     const availableLeads = onDutyTechs.filter(t => t.role === Role.LEAD).length - assignedCount;
-
-    // Check company hours
     const isCorpOpen = hour !== undefined ? isCompanyOpen(date, hour) : true;
-
     return {
       totalOnDuty: onDutyTechs.length,
       availableLeads: Math.max(0, availableLeads),
@@ -267,18 +250,12 @@ export const UnifiedCalendar: React.FC = () => {
 
   const candidateSquad = useMemo(() => {
     if (!technicians.length) return [];
-    
     return technicians.filter(t => {
       const onDuty = isTechOnDuty(t, newJob.date, newJob.time, newJob.type);
       if (!onDuty) return false;
-
-      if (newJob.type === 'inspection') {
-        return t.role === Role.LEAD;
-      } else {
-        return t.role === Role.LEAD || t.role === Role.ASSISTANT;
-      }
+      return newJob.type === 'inspection' ? t.role === Role.LEAD : (t.role === Role.LEAD || t.role === Role.ASSISTANT);
     });
-  }, [technicians, newJob.date, newJob.time, newJob.type, viewMode]);
+  }, [technicians, newJob.date, newJob.time, newJob.type]);
 
   const filteredEvents = useMemo(() => {
     if (viewMode === 'all') return events;
@@ -296,18 +273,15 @@ export const UnifiedCalendar: React.FC = () => {
   const handleCreateJob = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!companyId) return;
-
     setIsSaving(true);
     try {
       const d = new Date(newJob.date);
       const [h, m] = newJob.time.split(':').map(Number);
       d.setHours(h, m, 0, 0);
-
       const duration = companyConfig?.defaultInspectionDuration || 120;
       const end = new Date(d.getTime() + duration * 60 * 1000);
       const finalLossType = newJob.lossType === 'Other' ? (newJob.customLossType || 'Other') : newJob.lossType;
       const contact = contacts.find(c => c.id === newJob.contactId);
-
       let finalTechIds = [...newJob.techIds];
       if (finalTechIds.length === 0 && candidateSquad.length > 0) {
         const sortedSquad = [...candidateSquad].sort((a, b) => {
@@ -318,7 +292,6 @@ export const UnifiedCalendar: React.FC = () => {
         const bestTech = sortedSquad.find(t => !getTechConflict(t.id, newJob.date, newJob.time, newJob.id));
         if (bestTech) finalTechIds = [bestTech.id];
       }
-
       const updatedEvent: CalendarEvent = {
         id: newJob.id || generateUUID(),
         type: newJob.type,
@@ -331,24 +304,18 @@ export const UnifiedCalendar: React.FC = () => {
         status: 'pending',
         location: newJob.location || 'Unknown Location',
         lossType: finalLossType,
-        agentPhone1: companyConfig?.agentPhone1 || '' // Auto-stamp with company agent line
+        agentPhone1: companyConfig?.agentPhone1 || ''
       };
-
       await syncCalendarEventToSupabase(updatedEvent, companyId);
-      
-      // Update local state
       if (newJob.id) {
         setEvents(prev => prev.map(ev => ev.id === newJob.id ? updatedEvent : ev));
       } else {
         setEvents(prev => [...prev, updatedEvent]);
       }
-
       setIsBooking(false);
       resetBookingForm();
       setSelectedDate(d);
-    } catch (err: any) {
-      alert(`Error saving appointment: ${err.message}`);
-    } finally { setIsSaving(false); }
+    } catch (err: any) { alert(`Error saving appointment: ${err.message}`); } finally { setIsSaving(false); }
   };
 
   const resetBookingForm = () => {
@@ -389,54 +356,14 @@ export const UnifiedCalendar: React.FC = () => {
 
   const handleDeleteAppointment = async () => {
     if (!selectedEvent || !companyId) return;
-    if (!window.confirm("Are you sure you want to permanently delete this appointment? This cannot be undone.")) return;
-    
+    if (!window.confirm("Are you sure you want to permanently delete this appointment?")) return;
     setIsSaving(true);
     try {
       const { error } = await supabase.from('calendar_events').delete().eq('id', selectedEvent.id);
       if (error) throw error;
       setEvents(prev => prev.filter(e => e.id !== selectedEvent.id));
       setSelectedEvent(null);
-    } catch (err: any) {
-      alert(`Delete failed: ${err.message}`);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleCreateContact = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!companyId) return;
-    setIsSaving(true);
-    try {
-      const fullAddress = `${newContactForm.street}, ${newContactForm.city}, ${newContactForm.state} ${newContactForm.postalCode}`.replace(/^, /, '');
-      const fullName = `${newContactForm.firstName || ''} ${newContactForm.lastName || ''}`.trim();
-      const newContact: Contact = {
-        id: `con-${Date.now()}`,
-        name: fullName || 'Unknown',
-        firstName: newContactForm.firstName,
-        lastName: newContactForm.lastName,
-        phone: newContactForm.phone,
-        email: newContactForm.email,
-        address: fullAddress,
-        street: newContactForm.street,
-        city: newContactForm.city,
-        state: newContactForm.state,
-        postalCode: newContactForm.postalCode,
-        country: newContactForm.country || 'USA',
-        tags: ['New Lead', 'Manual Entry'],
-        type: newContactForm.type,
-        pipelineStage: 'Inbound',
-        lastActivity: 'Just created',
-        customFields: {}
-      };
-      await syncContactToSupabase(newContact, companyId);
-      setContacts(prev => [newContact, ...prev]);
-      setNewJob(prev => ({ ...prev, contactId: newContact.id, location: fullAddress }));
-      setIsAddingContact(false);
-      setNewContactForm({ firstName: '', lastName: '', phone: '', email: '', type: ContactType.HOMEOWNER, street: '', city: '', state: 'CA', postalCode: '', country: 'USA' });
-      setIsContactPickerOpen(false);
-    } catch (err: any) { alert(err.message); } finally { setIsSaving(false); }
+    } catch (err: any) { alert(`Delete failed: ${err.message}`); } finally { setIsSaving(false); }
   };
 
   const filteredContactsList = useMemo(() => {
@@ -489,8 +416,8 @@ export const UnifiedCalendar: React.FC = () => {
         </div>
         <div className="flex items-center gap-6">
           <div className="flex bg-slate-100 p-1 rounded-2xl border border-slate-200">
-             {[ { id: 'day', label: 'Day', icon: <Clock size={14} /> }, { id: 'week', label: 'Week', icon: <Columns size={14} /> }, { id: 'month', label: 'Month', icon: <LayoutGrid size={14} /> } ].map(v => (
-               <button key={v.id} onClick={() => setViewType(v.id as ViewType)} className={`flex items-center gap-2 px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewType === v.id ? 'bg-white text-slate-900 shadow-sm border border-slate-200' : 'text-slate-400 hover:text-slate-600'}`}>{v.icon} {v.label}</button>
+             {[ { id: 'day' as ViewType, label: 'Day', icon: <Clock size={14} /> }, { id: 'week' as ViewType, label: 'Week', icon: <Columns size={14} /> }, { id: 'month' as ViewType, label: 'Month', icon: <LayoutGrid size={14} /> } ].map(v => (
+               <button key={v.id} onClick={() => setViewType(v.id)} className={`flex items-center gap-2 px-4 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${viewType === v.id ? 'bg-white text-slate-900 shadow-sm border border-slate-200' : 'text-slate-400 hover:text-slate-600'}`}>{v.icon} {v.label}</button>
              ))}
           </div>
           <div className="flex items-center bg-white border border-slate-200 rounded-2xl px-2 py-1.5 shadow-sm">
@@ -518,19 +445,16 @@ export const UnifiedCalendar: React.FC = () => {
               </div>
               <div className="flex-1 overflow-y-auto scrollbar-hide">
                 {hoursList.map((hour) => {
-                  // Filter events for this specific hour row
                   const hourEvents = filteredEvents.filter(e => {
                     const d = new Date(e.startTime);
                     return d.toDateString() === selectedDate.toDateString() && d.getHours() === hour;
                   });
                   const cap = getCapacityDetails(selectedDate, hour);
                   const displayHour = hour > 12 ? `${hour - 12}:00 PM` : `${hour}:00 ${hour === 12 ? 'PM' : 'AM'}`;
-                  
                   return (
                     <div key={hour} className={`grid grid-cols-[120px_1fr] border-b border-slate-50 min-h-[120px] group transition-colors ${(cap.isLocked || cap.isOutsideCorpHours) ? 'bg-slate-50/20' : ''}`}>
                       <div className="border-r border-slate-50 p-6 flex items-start justify-center"><span className={`text-xs font-black transition-colors ${cap.isLocked || cap.isOutsideCorpHours ? 'text-slate-300' : 'text-slate-400 group-hover:text-slate-800'}`}>{displayHour}</span></div>
                       <div className="p-4 px-8 flex flex-wrap gap-4 relative">
-                        {/* Always Render Existing Appointments */}
                         {hourEvents.map(event => (
                           <button key={event.id} onClick={() => setSelectedEvent(event)} className={`flex-1 min-w-[320px] max-w-[500px] p-6 rounded-[2rem] border text-left transition-all hover:scale-[1.02] shadow-sm z-20 ${event.type === 'emergency' ? 'bg-blue-600 border-blue-500 text-white shadow-blue-600/20' : 'bg-emerald-600 border-emerald-500 text-white shadow-emerald-600/20'}`}>
                             <div className="flex justify-between items-start mb-3">
@@ -544,17 +468,11 @@ export const UnifiedCalendar: React.FC = () => {
                             </div>
                           </button>
                         ))}
-
-                        {/* Rendering Availability Button (unless locked or outside hours) */}
                         {!cap.isLocked && !cap.isOutsideCorpHours && (
                           <button 
                             onClick={() => { 
                               resetBookingForm();
-                              setNewJob(prev => ({
-                                ...prev,
-                                date: selectedDate,
-                                time: `${hour.toString().padStart(2, '0')}:00`
-                              }));
+                              setNewJob(prev => ({ ...prev, date: selectedDate, time: `${hour.toString().padStart(2, '0')}:00` }));
                               setIsBooking(true);
                             }}
                             className={`flex-1 min-w-[200px] flex items-center justify-center transition-opacity border-2 border-dashed border-slate-100 rounded-[2rem] hover:bg-blue-50 hover:border-blue-200 ${hourEvents.length > 0 ? 'opacity-0 group-hover:opacity-100' : 'opacity-100'}`}
@@ -562,7 +480,6 @@ export const UnifiedCalendar: React.FC = () => {
                              <span className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em] flex items-center gap-2"><Plus size={14} /> Book Slot ({cap.availableLeads} Ready)</span>
                           </button>
                         )}
-                        
                         {(cap.isLocked || cap.isOutsideCorpHours) && hourEvents.length === 0 && (
                           <div className="flex-1 flex items-center justify-center border-2 border-dashed border-slate-50 rounded-[2rem]">
                             {cap.isOutsideCorpHours ? <Clock size={16} className="text-slate-200 mr-3" /> : <Lock size={16} className="text-slate-200 mr-3" />}
@@ -660,7 +577,6 @@ export const UnifiedCalendar: React.FC = () => {
         </div>
       </div>
 
-      {/* Quick Settings Modal (Shortcut) */}
       {showBusinessHours && companyConfig && (
         <ManageAccount 
           isOpen={true} 
@@ -670,7 +586,6 @@ export const UnifiedCalendar: React.FC = () => {
         />
       )}
 
-      {/* Event Details Modal */}
       {selectedEvent && (
         <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-xl animate-in fade-in duration-300">
            <div className="bg-white w-full max-w-xl rounded-[3rem] shadow-2xl overflow-hidden flex flex-col border border-white/20">
@@ -707,35 +622,6 @@ export const UnifiedCalendar: React.FC = () => {
                     </div>
                  </div>
 
-                 {(selectedEvent.jobId || selectedEvent.agentPhone1) && (
-                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                      {selectedEvent.jobId && (
-                        <div className="space-y-3">
-                           <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Linked Project File</label>
-                           <div className="flex items-center gap-4 bg-white p-5 rounded-2xl border border-blue-50 shadow-sm">
-                             <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center shadow-inner"><Briefcase size={20} /></div>
-                             <div className="flex-1">
-                               <p className="text-sm font-black text-slate-800">{jobs.find(j => j.id === selectedEvent.jobId)?.title || 'File Not Found'}</p>
-                               <p className="text-[10px] font-bold text-blue-600 uppercase tracking-widest">{jobs.find(j => j.id === selectedEvent.jobId)?.stage || 'Inbound'}</p>
-                             </div>
-                           </div>
-                        </div>
-                      )}
-                      {selectedEvent.agentPhone1 && (
-                        <div className="space-y-3">
-                           <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Assigned AI Line</label>
-                           <div className="flex items-center gap-4 bg-white p-5 rounded-2xl border border-purple-50 shadow-sm">
-                             <div className="w-10 h-10 bg-purple-50 text-purple-600 rounded-xl flex items-center justify-center shadow-inner"><Bot size={20} /></div>
-                             <div className="flex-1">
-                               <p className="text-sm font-black text-slate-800">{selectedEvent.agentPhone1}</p>
-                               <p className="text-[10px] font-bold text-purple-600 uppercase tracking-widest">Sarah AI Secure Link</p>
-                             </div>
-                           </div>
-                        </div>
-                      )}
-                   </div>
-                 )}
-
                  <div className="space-y-4">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center justify-between">Assigned Dispatch Squad</label>
                     <div className="flex flex-wrap gap-3">
@@ -763,7 +649,6 @@ export const UnifiedCalendar: React.FC = () => {
         </div>
       )}
 
-      {/* Booking Form Modal */}
       {isBooking && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300 overflow-y-auto">
           <div className="bg-white w-full max-w-2xl rounded-[3rem] shadow-2xl overflow-hidden flex flex-col border border-white/20 my-auto">
@@ -780,7 +665,7 @@ export const UnifiedCalendar: React.FC = () => {
                   <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Link CRM Owner <span className="text-red-500">*</span></label>
                   <div 
                     className={`relative flex items-center bg-slate-50 border rounded-2xl px-5 py-3.5 cursor-pointer transition-all hover:bg-white ${isContactPickerOpen ? 'border-blue-600 ring-4 ring-blue-600/5 shadow-inner' : 'border-slate-200'}`}
-                    onClick={() => { setIsContactPickerOpen(!isContactPickerOpen); setIsDatePickerOpen(false); setIsTimePickerOpen(false); }}
+                    onClick={() => { setIsContactPickerOpen(!isContactPickerOpen); }}
                   >
                     <User size={16} className={`mr-4 transition-colors ${isContactPickerOpen ? 'text-blue-600' : 'text-slate-400'}`} />
                     <span className={`text-sm font-bold ${newJob.contactId ? 'text-slate-800' : 'text-slate-300'}`}>
@@ -792,9 +677,8 @@ export const UnifiedCalendar: React.FC = () => {
                       <div className="flex items-center gap-2 mb-3">
                         <div className="relative flex-1">
                           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                          <input type="text" autoFocus placeholder="Search Owners..." value={contactSearch} onChange={(e) => setContactSearch(e.target.value)} onKeyDown={(e) => e.stopPropagation()} className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-600/10" />
+                          <input type="text" autoFocus placeholder="Search Owners..." value={contactSearch} onChange={(e) => setContactSearch(e.target.value)} className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-600/10" />
                         </div>
-                        <button type="button" onClick={(e) => { e.stopPropagation(); setIsAddingContact(true); }} className="p-2.5 bg-blue-600 text-white rounded-xl shadow-lg shadow-blue-600/20 hover:bg-blue-700 transition-all active:scale-95"><UserPlus size={16} /></button>
                       </div>
                       <div className="overflow-y-auto scrollbar-hide space-y-1">
                         {filteredContactsList.map(c => (

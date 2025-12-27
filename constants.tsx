@@ -3,7 +3,7 @@ import {
   Role, Status, InspectionStatus, DispatchStrategy, 
   NotificationPreference, RestorationCompany, Technician,
   DispatchLog, DaySchedule, Contact, Conversation, ConversationSource, ContactType, TeamMember, CalendarEvent, Job
-} from './types.ts';
+} from './types';
 
 export const DEFAULT_SCHEDULE: DaySchedule[] = [
   { day: 'Mon', enabled: true, is24Hours: false, start: '08:00 AM', end: '05:00 PM', override: 'None' },
@@ -27,7 +27,6 @@ export const MOCK_JOBS: Job[] = [
     contactId: 'con1',
     title: 'Burst Pipe Emergency',
     stage: 'Dispatching',
-    // Added missing 'status' property required by Job type
     status: 'Open',
     lossType: 'Water Damage',
     assignedTechIds: ['T2'],
@@ -44,7 +43,6 @@ export const MOCK_JOBS: Job[] = [
     contactId: 'con2',
     title: 'Mold Remediation Inspection',
     stage: 'Inbound',
-    // Added missing 'status' property required by Job type
     status: 'Open',
     lossType: 'Mold',
     assignedTechIds: [],
@@ -86,7 +84,6 @@ export const MOCK_RESTORATION_COMPANIES: RestorationCompany[] = [
     ownerName: "Santino Velci",
     plan: "Pro AI",
     totalDispatches: 145,
-    // Fix: Added missing inspectionSchedule property required by RestorationCompany type
     inspectionSchedule: [...DEFAULT_SCHEDULE],
     customFieldConfig: [
       { id: 'cf1', label: 'Insurance Carrier', type: 'text' },
@@ -154,7 +151,6 @@ export const MOCK_CONVERSATIONS: Conversation[] = [
     urgency: 'High',
     isStarred: true,
     isUnread: true,
-    // Fix: replaced incorrect 'type' property with mandatory 'category' property
     category: 'company_inbox',
     messages: [
       {
@@ -263,66 +259,11 @@ export const MOCK_DISPATCH_LOGS: DispatchLog[] = [
 ];
 
 export const SERVICE_OPTIONS = [
-  "Air Duct Cleaning",
-  "Art Restoration",
-  "Asbestos Abatement",
-  "Biohazard & Specialty Cleaning",
-  "Black Mold Abatement",
-  "Board-Up & Tarping Services",
-  "Burst Pipe Cleanup",
-  "Cabinetry",
-  "Carpet & Upholstery Cleaning",
-  "Content Cleaning",
-  "Content Pack-Out & Storage",
-  "Crawl Space Encapsulation",
-  "Crime Scene Cleanup",
-  "Document Drying & Recovery",
-  "Dryer Vent Cleaning",
-  "Drywall & Painting",
-  "Electronics Restoration",
-  "Emergency Water Extraction",
-  "Fire & Smoke Restoration",
-  "Fire Damage Restoration",
-  "Flooring Installation",
-  "General Cleaning & Maintenance",
-  "General Contracting",
-  "Hardwood Floor Drying (Injectidry)",
-  "Hoarding Cleanup",
-  "Indoor Air Quality (IAQ) Testing",
-  "Infectious Disease Disinfection",
-  "Lead Paint Abatement",
-  "Leak Detection",
-  "Meth Lab Cleanup",
-  "Microbial Remediation (Mold Removal)",
-  "Mold Inspection & Assessment",
-  "Mold Remediation",
-  "Odor Control / Deodorization",
-  "Post-Construction Cleaning",
-  "Puffback Cleanup",
-  "Reconstruction & Repairs",
-  "Roofing Repair",
-  "Sewage Cleanup & Remediation",
-  "Soot & Smoke Removal",
-  "Structural Drying & Dehumidification",
-  "Structural Repairs",
-  "Sump Pump Failure Cleanup",
-  "Tear Gas Cleanup",
-  "Textile Restoration",
-  "Tile & Grout Cleaning",
-  "Trauma Scene Cleanup",
-  "Unattended Death Cleanup",
-  "Vandalism & Graffiti Removal",
-  "Water Damage Restoration"
+  "Air Duct Cleaning", "Art Restoration", "Asbestos Abatement", "Biohazard & Specialty Cleaning", "Black Mold Abatement", "Board-Up & Tarping Services", "Burst Pipe Cleanup", "Cabinetry", "Carpet & Upholstery Cleaning", "Content Cleaning", "Content Pack-Out & Storage", "Crawl Space Encapsulation", "Crime Scene Cleanup", "Document Drying & Recovery", "Dryer Vent Cleaning", "Drywall & Painting", "Electronics Restoration", "Emergency Water Extraction", "Fire & Smoke Restoration", "Fire Damage Restoration", "Flooring Installation", "General Cleaning & Maintenance", "General Contracting", "Hardwood Floor Drying (Injectidry)", "Hoarding Cleanup", "Indoor Air Quality (IAQ) Testing", "Infectious Disease Disinfection", "Lead Paint Abatement", "Leak Detection", "Meth Lab Cleanup", "Microbial Remediation (Mold Removal)", "Mold Inspection & Assessment", "Mold Remediation", "Odor Control / Deodorization", "Post-Construction Cleaning", "Puffback Cleanup", "Reconstruction & Repairs", "Roofing Repair", "Sewage Cleanup & Remediation", "Soot & Smoke Removal", "Structural Drying & Dehumidification", "Structural Repairs", "Sump Pump Failure Cleanup", "Tear Gas Cleanup", "Textile Restoration", "Tile & Grout Cleaning", "Trauma Scene Cleanup", "Unattended Death Cleanup", "Vandalism & Graffiti Removal", "Water Damage Restoration"
 ];
 
 export const TIMEZONES = [
-  "America/Los_Angeles",
-  "America/Chicago",
-  "Pacific/Honolulu",
-  "America/Anchorage",
-  "America/Phoenix",
-  "America/Denver",
-  "America/New_York"
+  "America/Los_Angeles", "America/Chicago", "Pacific/Honolulu", "America/Anchorage", "America/Phoenix", "America/Denver", "America/New_York"
 ];
 
 export const INITIAL_COMPANY_SETTINGS = MOCK_RESTORATION_COMPANIES[0];

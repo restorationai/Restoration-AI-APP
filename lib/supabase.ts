@@ -1,12 +1,11 @@
 
 import { createClient } from '@supabase/supabase-js';
-import { Status, InspectionStatus, Contact, ContactType, Job, PipelineStage, Conversation, Message, ConversationSource, Role, RestorationCompany, CalendarEvent, DaySchedule, DispatchLog } from '../types.ts';
-import { toE164, toDisplay } from '../utils/phoneUtils.ts';
+import { Status, InspectionStatus, Contact, ContactType, Job, PipelineStage, Conversation, Message, ConversationSource, Role, RestorationCompany, CalendarEvent, DaySchedule, DispatchLog } from '../types';
+import { toE164, toDisplay } from '../utils/phoneUtils';
 
 const SUPABASE_URL = 'https://nyscciinkhlutvqkgyvq.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im55c2NjaWlua2hsdXR2cWtneXZxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYyODMxMzMsImV4cCI6MjA4MTg1OTEzM30.4c3QmNYFZS68y4JLtEKwzVo_nQm3pKzucLOajSVRDOA';
 
-// Centralized Outbound Logic: Master n8n webhook for Twilio processing
 const N8N_MASTER_OUTBOUND_WEBHOOK = 'https://restorationai.app.n8n.cloud/webhook/master-outbound-sms'; 
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -21,9 +20,6 @@ const DEFAULT_CORP_SCHEDULE: DaySchedule[] = [
   { day: 'Sun', enabled: false, is24Hours: false, start: '08:00 AM', end: '05:00 PM', override: 'None' },
 ];
 
-/**
- * AUTHENTICATION
- */
 export const getCurrentUser = async () => {
   try {
     const { data: { user } } = await supabase.auth.getUser();
@@ -49,9 +45,6 @@ export const getCurrentUser = async () => {
 
 export const signOut = () => supabase.auth.signOut();
 
-/**
- * DATA FETCHERS
- */
 export const fetchCompanySettings = async (companyId: string): Promise<RestorationCompany | null> => {
   try {
     const { data, error } = await supabase
@@ -106,7 +99,6 @@ export const fetchCompanySettings = async (companyId: string): Promise<Restorati
       defaultInspectionDuration: data.default_inspection_duration ?? 120,
       appointmentBufferTime: data.appointment_buffer_time ?? 30,
       serviceAreas: data.service_areas || '',
-      // Individual Directory Slots
       transfer_1_name: data.transfer_1_name, transfer_1_phone: toDisplay(data.transfer_1_phone),
       transfer_2_name: data.transfer_2_name, transfer_2_phone: toDisplay(data.transfer_2_phone),
       transfer_3_name: data.transfer_3_name, transfer_3_phone: toDisplay(data.transfer_3_phone),
@@ -164,7 +156,6 @@ export const syncCompanySettingsToSupabase = async (companyData: RestorationComp
     transfer_6_name: companyData.transfer_6_name || null, transfer_6_phone: toE164(companyData.transfer_6_phone || ''),
   };
 
-  // Strip undefined values to avoid Supabase errors
   Object.keys(payload).forEach(key => payload[key] === undefined && delete payload[key]);
 
   const { data, error } = await supabase
@@ -173,15 +164,7 @@ export const syncCompanySettingsToSupabase = async (companyData: RestorationComp
     .eq('id', companyData.id)
     .select();
 
-  if (error) {
-    console.error("Supabase syncCompanySettings Error:", error);
-    throw new Error(error.message);
-  }
-
-  if (!data || data.length === 0) {
-    throw new Error("Security Policy Denied: Database rejected the update. Please check if you have permission to edit this record in Supabase.");
-  }
-
+  if (error) throw new Error(error.message);
   return data;
 };
 
@@ -249,14 +232,10 @@ export const syncTechnicianToSupabase = async (techData: any) => {
   };
   
   const { data: techSync, error: techError } = await supabase.from('technicians').upsert({ id: techId, ...techPayload }, { onConflict: 'id' }).select();
-  
   if (techError) throw new Error(techError.message);
-  if (!techSync || techSync.length === 0) {
-    throw new Error("Security Policy Denied: Unable to sync technician.");
-  }
 
   const contactId = techId.startsWith('T-') ? techId.replace('T-', 'CON-') : `CON-${techId}`;
-  const contactPayload: any = {
+  await supabase.from('contacts').upsert({
     id: contactId,
     name: techData.name,
     phone: e164Phone || '+15555555555',
@@ -267,9 +246,8 @@ export const syncTechnicianToSupabase = async (techData: any) => {
     address: 'Internal Staff Record',
     tags: ['Technician', 'Internal Staff'],
     pipeline_stage: 'Inbound'
-  };
+  }, { onConflict: 'id' });
 
-  await supabase.from('contacts').upsert(contactPayload, { onConflict: 'id' });
   return techSync;
 };
 
@@ -284,22 +262,11 @@ export const deleteTechnicianFromSupabase = async (techId: string) => {
     .delete({ count: 'exact' })
     .eq('id', techId);
 
-  if (error) {
-    if (error.code === '23503') {
-      throw new Error("Cannot delete technician: They are still assigned to active jobs or calendar appointments.");
-    }
-    throw new Error(error.message);
-  }
-
-  if (count === 0) {
-    throw new Error("Deletion failed: Record not found or database security policy prevented removal.");
-  }
-
+  if (error) throw new Error(error.message);
   return true;
 };
 
 export const syncScheduleToSupabase = async (techId: string, schedule: any[], scheduleType: string = 'emergency') => {
-  // Isolated deletion by technician AND type
   await supabase.from('technician_schedules').delete().eq('technician_id', techId).eq('schedule_type', scheduleType);
   
   const rows = schedule.map(s => ({
@@ -360,29 +327,30 @@ export const syncCalendarEventToSupabase = async (event: any, clientId: string) 
   return data;
 };
 
-export const fetchContactsFromSupabase = async (clientId: string) => {
+export const fetchContactsFromSupabase = async (clientId: string): Promise<Contact[]> => {
   const { data, error } = await supabase.from('contacts').select('*').eq('client_id', clientId);
   if (error) throw new Error(error.message);
   return (data || []).map((c: any) => ({
     id: c.id,
-    name: c.name,
+    name: c.name || '',
     firstName: c.first_name,
     lastName: c.last_name,
     phone: toDisplay(c.phone),
-    email: c.email,
-    address: c.address,
+    email: c.email || '',
+    address: c.address || '',
     street: c.street,
     city: c.city,
     state: c.state,
-    postal_code: c.postal_code,
+    postalCode: c.postal_code,
     country: c.country,
     tags: c.tags || [],
     type: c.type as ContactType,
     role: c.role as Role,
-    pipelineStage: c.pipeline_stage,
+    pipelineStage: c.pipeline_stage || 'Inbound',
     notes: c.notes,
     company: c.company,
-    vip_status: c.vip_status,
+    vipStatus: c.vip_status || false,
+    lastActivity: c.updated_at ? new Date(c.updated_at).toLocaleDateString() : 'New',
     customFields: {}
   }));
 };
