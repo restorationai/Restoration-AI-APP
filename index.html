@@ -24,28 +24,16 @@
             animation: spin 0.8s linear infinite;
         }
     </style>
-    <script>
-        window.global = window;
-        window.process = {
-            env: { NODE_ENV: 'production', API_KEY: '' },
-            version: 'v18.0.0',
-            versions: { node: '18.0.0' },
-            cwd: () => '/',
-            nextTick: (cb) => setTimeout(cb, 0)
-        };
-    </script>
-    <script type="importmap">
+<script type="importmap">
 {
   "imports": {
-    "react": "https://esm.sh/react@18.3.1",
-    "react-dom": "https://esm.sh/react-dom@18.3.1",
-    "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
-    "react/jsx-runtime": "https://esm.sh/react@18.3.1/jsx-runtime",
-    "lucide-react": "https://esm.sh/lucide-react@0.460.0?bundle&deps=react@18.3.1",
-    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.46.1",
-    "@google/genai": "https://esm.sh/@google/genai@0.3.0",
-    "react-dom/": "https://esm.sh/react-dom@18.3.1/",
-    "react/": "https://esm.sh/react@18.3.1/"
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.89.0",
+    "vite": "https://esm.sh/vite@^7.3.0",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2"
   }
 }
 </script>
@@ -57,6 +45,6 @@
             <p style="margin-top: 24px; font-weight: 900; letter-spacing: 0.3em; font-size: 11px; color: #64748b; text-transform: uppercase;">Booting Restoration AI Dispatch Systems</p>
         </div>
     </div>
-    <script type="module" src="index.tsx"></script>
+    <script type="module" src="/index.tsx"></script>
 </body>
 </html>
