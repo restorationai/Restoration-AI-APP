@@ -95,6 +95,7 @@ const ManageAccount: React.FC<ManageAccountProps> = ({ isOpen, onClose, companyS
 
   const filteredTeamContacts = useMemo(() => {
     return allContacts.filter(c => 
+      c.type === ContactType.STAFF && // Only allow Team Members
       (c.name?.toLowerCase().includes(ownerSearchQuery.toLowerCase()) || c.phone?.includes(ownerSearchQuery))
     );
   }, [allContacts, ownerSearchQuery]);
@@ -126,7 +127,26 @@ const ManageAccount: React.FC<ManageAccountProps> = ({ isOpen, onClose, companyS
     setIsSearchingOwnerIdx(settings.owners.length);
   };
 
-  const handleRemoveOwner = (index: number) => {
+  const handleRemoveOwner = async (index: number) => {
+    const ownerToRemove = settings.owners[index];
+    
+    // Remove the 'Alert Recipient' tag from the master contact record
+    const masterContact = allContacts.find(c => c.phone === ownerToRemove.phone || c.email === ownerToRemove.email);
+    
+    if (masterContact) {
+      const updatedContact = {
+        ...masterContact,
+        tags: (masterContact.tags || []).filter(t => t !== 'Alert Recipient')
+      };
+      
+      try {
+        await syncContactToSupabase(updatedContact, settings.id);
+        setAllContacts(prev => prev.map(c => c.id === masterContact.id ? updatedContact : c));
+      } catch (err) {
+        console.error("Failed to remove Alert Recipient tag:", err);
+      }
+    }
+
     if (settings.owners.length <= 1) {
       const updatedOwners = [...settings.owners];
       updatedOwners[0] = { name: '', phone: '', email: '' };
@@ -139,7 +159,22 @@ const ManageAccount: React.FC<ManageAccountProps> = ({ isOpen, onClose, companyS
     }));
   };
 
-  const handleLinkContact = (index: number, contact: Contact) => {
+  const handleLinkContact = async (index: number, contact: Contact) => {
+    // Add 'Alert Recipient' tag to contact, preserve existing role
+    const updatedContact = {
+      ...contact,
+      tags: contact.tags?.includes('Alert Recipient') 
+        ? (contact.tags || []) 
+        : [...(contact.tags || []), 'Alert Recipient']
+    };
+
+    try {
+      await syncContactToSupabase(updatedContact, settings.id);
+      setAllContacts(prev => prev.map(c => c.id === contact.id ? updatedContact : c));
+    } catch (err) {
+      console.error("Failed to sync linked contact tags:", err);
+    }
+
     const updatedOwners = [...settings.owners];
     updatedOwners[index] = { name: contact.name, phone: contact.phone, email: contact.email };
     setSettings({ ...settings, owners: updatedOwners });
@@ -165,8 +200,8 @@ const ManageAccount: React.FC<ManageAccountProps> = ({ isOpen, onClose, companyS
         phone: formatPhoneNumberInput(newRecipientForm.phone),
         email: newRecipientForm.email,
         type: ContactType.STAFF,
-        role: Role.MANAGER,
-        tags: ['Alert Recipient', 'Management'],
+        role: Role.SUPPORT, // Default staff role, not manager
+        tags: ['Alert Recipient'], // Only 'Alert Recipient' tag as requested
         vipStatus: true,
         address: 'Internal Stakeholder',
         pipelineStage: 'Inbound',
