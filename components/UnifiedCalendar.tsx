@@ -45,11 +45,8 @@ import {
 } from 'lucide-react';
 import { CalendarEvent, AppointmentType, Technician, Role, Job, Contact, ContactType } from '../types';
 import { fetchCalendarEvents, syncCalendarEventToSupabase, fetchTechniciansFromSupabase, fetchCompanySettings, syncContactToSupabase, fetchContactsFromSupabase, fetchJobsFromSupabase, getCurrentUser, supabase } from '../lib/supabase';
-import { formatPhoneNumberInput, toDisplay } from '../utils/phoneUtils.ts';
-import ManageAccount from './ManageAccount.tsx';
-
-type CalendarMode = 'all' | 'emergency' | 'inspection';
-type ViewType = 'day' | 'week' | 'month';
+import { formatPhoneNumberInput } from '../utils/phoneUtils';
+import ManageAccount from './ManageAccount';
 
 const generateUUID = () => {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -58,7 +55,8 @@ const generateUUID = () => {
   });
 };
 
-const UnifiedCalendar: React.FC = () => {
+// Fix: Add export keyword
+export const UnifiedCalendar: React.FC = () => {
   const [viewMode, setViewMode] = useState<CalendarMode>('all');
   const [viewType, setViewType] = useState<ViewType>('day');
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -444,7 +442,7 @@ const UnifiedCalendar: React.FC = () => {
   const filteredContactsList = useMemo(() => {
     return contacts.filter(c => 
       (c.type !== ContactType.PROPERTY_MANAGER && c.type !== ContactType.STAFF) &&
-      (c.name.toLowerCase().includes(contactSearch.toLowerCase()) || c.phone.includes(contactSearch))
+      ((c.name || '').toLowerCase().includes(contactSearch.toLowerCase()) || (c.phone || '').includes(contactSearch))
     );
   }, [contacts, contactSearch]);
 
@@ -608,7 +606,7 @@ const UnifiedCalendar: React.FC = () => {
                          <div key={i} className={`p-1 border-r border-slate-50 last:border-r-0 relative group ${cap.isLocked || cap.isOutsideCorpHours ? 'bg-slate-50/30' : 'hover:bg-slate-50/50 transition-colors'}`}>
                            {hourEvents.map(event => (
                              <button key={event.id} onClick={() => setSelectedEvent(event)} className={`w-full mb-1 p-2 rounded-xl border text-left text-[9px] font-black uppercase transition-all hover:scale-[1.02] shadow-sm ${event.type === 'emergency' ? 'bg-blue-600 text-white border-blue-500' : 'bg-emerald-600 text-white border-emerald-500'}`}>
-                               <p className="truncate">{event.title.split(':')[1] || event.title}</p>
+                               <p className="truncate">{(event.title || '').split(':')[1] || event.title}</p>
                              </button>
                            ))}
                            {!cap.isLocked && !cap.isOutsideCorpHours && (
@@ -648,7 +646,7 @@ const UnifiedCalendar: React.FC = () => {
                       <div className="flex flex-col gap-1 overflow-y-auto scrollbar-hide">
                         {dayEvents.slice(0, 4).map(event => (
                           <button key={event.id} onClick={() => setSelectedEvent(event)} className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase truncate text-left border ${event.type === 'emergency' ? 'bg-blue-600 text-white border-blue-500' : 'bg-emerald-600 text-white border-emerald-500'}`}>
-                            {event.title.split(':')[1] || event.title}
+                            {(event.title || '').split(':')[1] || event.title}
                           </button>
                         ))}
                         {dayEvents.length > 4 && <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest text-center mt-1">+{dayEvents.length - 4} More</p>}
@@ -811,90 +809,37 @@ const UnifiedCalendar: React.FC = () => {
                 </div>
                 
                 <div className="col-span-2">
-                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Link to Active Job (Optional)</label>
-                  <select value={newJob.jobId} onChange={e => setNewJob({...newJob, jobId: e.target.value})} className="w-full h-[52px] px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm cursor-pointer">
-                    <option value="">Select Related Job...</option>
-                    {jobs.filter(j => j.status === 'Open').map(j => (
-                      <option key={j.id} value={j.id}>{j.title} ({j.lossType})</option>
-                    ))}
-                  </select>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="col-span-1">
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Service Type</label>
+                      <select value={newJob.type} onChange={e => setNewJob({...newJob, type: e.target.value as AppointmentType})} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black outline-none focus:ring-2 focus:ring-blue-600/10 transition-all cursor-pointer">
+                        <option value="inspection">Site Inspection</option>
+                        <option value="emergency">Emergency Response</option>
+                      </select>
+                    </div>
+                    <div className="col-span-1">
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Loss Category</label>
+                      <input type="text" value={newJob.lossType} onChange={e => setNewJob({...newJob, lossType: e.target.value})} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm" placeholder="e.g. Water Damage" />
+                    </div>
+                  </div>
                 </div>
-
-                <div className="col-span-2"><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Internal Job Title (Optional)</label><input type="text" placeholder="e.g. Assessment and Extraction" value={newJob.title} onChange={e => setNewJob({...newJob, title: e.target.value})} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm transition-all" /></div>
-                
-                <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Appointment Type</label><div className="flex gap-2 p-1 bg-slate-100 rounded-2xl border border-slate-200"><button type="button" onClick={() => setNewJob({...newJob, type: 'inspection', techIds: []})} className={`flex-1 py-3 rounded-xl text-[11px] font-black uppercase transition-all flex items-center justify-center gap-2 ${newJob.type === 'inspection' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-600 bg-transparent'}`}><ShieldCheck size={16} /> Inspection</button><button type="button" onClick={() => setNewJob({...newJob, type: 'emergency', techIds: []})} className={`flex-1 py-3 rounded-xl text-[11px] font-black uppercase transition-all flex items-center justify-center gap-2 ${newJob.type === 'emergency' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-600 bg-transparent'}`}><AlertCircle size={16} /> Emergency</button></div></div>
-                
-                <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Loss Category</label><select value={newJob.lossType} onChange={e => setNewJob({...newJob, lossType: e.target.value})} className="w-full h-[52px] px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm cursor-pointer"><option value="">Select Category...</option><option value="Mold Assessment">Mold Assessment</option><option value="Water Damage Assessment">Water Damage Assessment</option><option value="Fire Damage Assessment">Fire Damage Assessment</option><option value="Biohazard Assessment">Biohazard Assessment</option><option value="Storm Damage Assessment">Storm Damage Assessment</option><option value="Other">Other</option></select></div>
-                
-                <div className="relative"><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Scheduled Date</label><div className={`relative flex items-center bg-slate-50 border rounded-2xl px-5 py-3.5 cursor-pointer transition-all hover:bg-white ${isDatePickerOpen ? 'border-blue-600 ring-4 ring-blue-600/5 shadow-inner' : 'border-slate-200'}`} onClick={() => { setIsDatePickerOpen(!isDatePickerOpen); setIsTimePickerOpen(false); setIsContactPickerOpen(false); }}><CalendarDays size={16} className={`mr-4 transition-colors ${isDatePickerOpen ? 'text-blue-600' : 'text-slate-400'}`} /><span className={`text-sm font-bold ${isDatePickerOpen ? 'text-blue-600' : 'text-slate-800'}`}>{newJob.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span></div>{isDatePickerOpen && <div className="absolute top-full left-0 mt-2 w-[320px] bg-white rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-slate-100 z-[300] p-6 animate-in zoom-in-95 duration-200 overflow-hidden"><div className="flex items-center justify-between mb-6"><button type="button" onClick={() => setPickerViewDate(new Date(pickerViewDate.getFullYear(), pickerViewDate.getMonth() - 1))} className="p-2 text-slate-300 hover:text-slate-900 transition-colors"><ChevronLeft size={20} /></button><span className="text-sm font-black text-slate-800 uppercase tracking-widest">{pickerViewDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</span><button type="button" onClick={() => setPickerViewDate(new Date(pickerViewDate.getFullYear(), pickerViewDate.getMonth() + 1))} className="p-2 text-slate-300 hover:text-slate-900 transition-colors"><ChevronRight size={20} /></button></div><div className="grid grid-cols-7 gap-1 mb-4">{['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(d => (<div key={d} className="text-center text-[10px] font-black text-slate-400 uppercase py-2">{d}</div>))}{(() => { const year = pickerViewDate.getFullYear(); const month = pickerViewDate.getMonth(); const firstDay = new Date(year, month, 1).getDay(); const daysInMonth = new Date(year, month + 1, 0).getDate(); const prevMonthDays = new Date(year, month, 0).getDate(); const days = []; for (let i = firstDay - 1; i >= 0; i--) days.push({ day: prevMonthDays - i, current: false, date: new Date(year, month - 1, prevMonthDays - i) }); for (let i = 1; i <= daysInMonth; i++) days.push({ day: i, current: true, date: new Date(year, month, i) }); const remaining = 42 - days.length; for (let i = 1; i <= remaining; i++) days.push({ day: i, current: false, date: new Date(year, month + 1, i) }); return days.map((d, i) => { const past = d.date < new Date(new Date().setHours(0,0,0,0)); const sel = d.date.toDateString() === newJob.date.toDateString(); return (<button key={i} type="button" disabled={past} onClick={() => { setNewJob({ ...newJob, date: d.date }); setIsDatePickerOpen(false); }} className={`h-10 w-10 flex items-center justify-center rounded-full text-xs font-bold transition-all ${sel ? 'bg-blue-600 text-white shadow-lg' : past ? 'text-slate-200 cursor-not-allowed opacity-40' : d.current ? 'text-slate-700 hover:bg-slate-100' : 'text-slate-300 hover:bg-slate-50'}`}>{d.day}</button>); }); })()}</div></div>}</div>
-                
-                <div className="relative"><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Scheduled Time</label><div className={`relative flex items-center bg-slate-50 border rounded-2xl px-5 py-3.5 cursor-pointer transition-all hover:bg-white ${isTimePickerOpen ? 'border-blue-600 ring-4 ring-blue-600/5 shadow-inner' : 'border-slate-200'}`} onClick={() => { setIsTimePickerOpen(!isTimePickerOpen); setIsDatePickerOpen(false); setIsContactPickerOpen(false); }}><Clock size={16} className={`mr-4 transition-colors ${isTimePickerOpen ? 'text-blue-600' : 'text-slate-400'}`} /><span className={`text-sm font-bold ${isTimePickerOpen ? 'text-blue-600' : 'text-slate-800'}`}>{(() => { const [h_str, m_str] = newJob.time.split(':'); const h = parseInt(h_str); const m = parseInt(m_str); const p = h >= 12 ? 'PM' : 'AM'; return `${h % 12 || 12}:${m.toString().padStart(2, '0')} ${p}`; })()}</span></div>{isTimePickerOpen && <div className="absolute top-full left-0 mt-2 w-[280px] bg-white rounded-3xl shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-slate-100 z-[300] p-6 animate-in zoom-in-95 duration-200 overflow-hidden"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 text-center">Set Execution Time</p><div className="flex items-center justify-center gap-4 mb-8">{(() => { const [h, m] = newJob.time.split(':').map(Number); const period = h >= 12 ? 'PM' : 'AM'; const displayH = h % 12 || 12; const updateTime = (newH: number, newM: number, newPeriod: 'AM' | 'PM') => { let finalH = newH; if (newPeriod === 'PM' && finalH !== 12) finalH += 12; if (newPeriod === 'AM' && finalH === 12) finalH = 0; setNewJob({ ...newJob, time: `${finalH.toString().padStart(2, '0')}:${newM.toString().padStart(2, '0')}` }); }; return (<><div className="flex flex-col items-center gap-2"><button type="button" onClick={() => updateTime(displayH === 12 ? 1 : displayH + 1, m, period)} className="p-1 text-slate-300 hover:text-blue-600"><ChevronUp size={20} /></button><span className="text-3xl font-black text-slate-800">{displayH}</span><button type="button" onClick={() => updateTime(displayH === 1 ? 12 : displayH - 1, m, period)} className="p-1 text-slate-300 hover:text-blue-600"><ChevronDown size={20} /></button></div><span className="text-3xl font-black text-slate-200 mb-1">:</span><div className="flex flex-col items-center gap-2"><button type="button" onClick={() => updateTime(displayH, (m + 5) % 60, period)} className="p-1 text-slate-300 hover:text-blue-600"><ChevronUp size={20} /></button><span className="text-3xl font-black text-slate-800">{m.toString().padStart(2, '0')}</span><button type="button" onClick={() => updateTime(displayH, (m - 5 + 60) % 60, period)} className="p-1 text-slate-300 hover:text-blue-600"><ChevronDown size={20} /></button></div><div className="flex flex-col gap-2 ml-2"><button type="button" onClick={() => updateTime(displayH, m, 'AM')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${period === 'AM' ? 'bg-blue-600 border-blue-600 text-white shadow-lg' : 'bg-slate-50 border-slate-100 text-slate-400'}`}>AM</button><button type="button" onClick={() => updateTime(displayH, m, 'PM')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${period === 'PM' ? 'bg-blue-600 border-blue-600 text-white shadow-lg' : 'bg-slate-50 border-slate-100 text-slate-400'}`}>PM</button></div></>); })()}</div><button type="button" onClick={() => setIsTimePickerOpen(false)} className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-blue-600/20 hover:bg-blue-700 transition-all w-full">Confirm Time</button></div>}</div>
-                
-                <div className="col-span-2"><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Service Address (Street Only)</label><div className="relative"><MapPin size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" /><input type="text" required placeholder="Street Address" value={newJob.location} onChange={e => setNewJob({...newJob, location: e.target.value})} className="w-full pl-12 pr-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm" /></div></div>
-                
-                <div className="col-span-2 space-y-4"><div className="flex items-center justify-between px-1"><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Assign Dispatch Squad</label><span className="text-[9px] font-black text-blue-600 uppercase tracking-widest flex items-center gap-1"><Users size={12} /> {candidateSquad.length} Available On-Duty</span></div>{candidateSquad.length === 0 ? (<div className="p-10 bg-slate-50 border border-dashed border-slate-200 rounded-[2.5rem] flex flex-col items-center justify-center text-center"><AlertTriangle size={24} className="text-amber-400 mb-3" /><p className="text-[11px] font-black text-slate-500 uppercase tracking-widest leading-relaxed">No technicians are currently on-duty <br/> for this specific slot.</p></div>) : (<div className="grid grid-cols-2 gap-3 max-h-[250px] overflow-y-auto scrollbar-hide pr-1">{candidateSquad.map(tech => { const conflict = getTechConflict(tech.id, newJob.date, newJob.time, newJob.id); const isSelected = newJob.techIds.includes(tech.id); return (<button key={tech.id} type="button" onClick={() => { const ids = [...newJob.techIds]; const idx = ids.indexOf(tech.id); if (idx > -1) ids.splice(idx, 1); else ids.push(tech.id); setNewJob({...newJob, techIds: ids}); }} className={`flex flex-col p-4 rounded-2xl border transition-all text-left relative overflow-hidden group/tech ${isSelected ? 'bg-blue-600 border-blue-600 text-white shadow-lg' : conflict ? 'bg-slate-50 border-slate-100 opacity-60 grayscale' : 'bg-white border-slate-200 text-slate-600 hover:border-blue-200'}`}><div className="flex items-center gap-3 w-full"><div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-[10px] shadow-sm transition-colors ${isSelected ? 'bg-white/20' : 'bg-slate-100 group-hover/tech:bg-blue-50'}`}>{tech.name?.split(' ').map(n => n[0]).join('')}</div><div className="flex-1 min-w-0"><p className="text-xs font-black truncate">{tech.name}</p><p className={`text-[8px] font-black uppercase tracking-widest ${isSelected ? 'text-blue-100' : 'text-slate-400'}`}>{tech.role}</p></div>{isSelected && <Check size={14} />}</div>{conflict && !isSelected && (<div className="mt-2 flex items-center gap-1.5 text-[8px] font-black text-amber-600 uppercase tracking-widest bg-amber-50 px-2 py-0.5 rounded-md w-fit"><CalendarRange size={10} /> Conflict: {conflict.title.split(':')[0]}</div>)}</button>); })}</div>)}{newJob.techIds.length === 0 && candidateSquad.length > 0 && (<div className="px-4 py-2 bg-blue-50 border border-blue-100 rounded-xl flex items-center gap-3"><Info size={14} className="text-blue-500" /><p className="text-[9px] font-bold text-blue-700 uppercase tracking-tight leading-none">Auto-assign logic active: The highest priority available technician will be linked upon confirmation.</p></div>)}</div>
               </div>
-              <div className="pt-4 flex gap-4 sticky bottom-0 bg-white/90 backdrop-blur-sm pb-2"><button type="button" onClick={() => setIsBooking(false)} className="flex-1 py-4 bg-slate-100 text-slate-500 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-slate-200 transition-all">Cancel</button><button type="submit" disabled={isSaving || !newJob.contactId} className="flex-[2] py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl shadow-blue-600/30 hover:bg-blue-700 transition-all active:scale-95 flex items-center justify-center gap-3 disabled:opacity-50">{isSaving ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}{isSaving ? 'Syncing...' : (newJob.id ? 'Update Appointment' : 'Complete Dispatch Entry')}</button></div>
+
+              <div className="pt-4 flex gap-4 sticky bottom-0 bg-white/90 backdrop-blur-sm pb-2">
+                <button type="button" onClick={() => setIsBooking(false)} className="flex-1 py-4 bg-slate-100 text-slate-500 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-slate-200 transition-all">Cancel</button>
+                <button 
+                  type="submit" 
+                  disabled={isSaving || !newJob.contactId}
+                  className="flex-[2] py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl shadow-blue-600/30 hover:bg-blue-700 transition-all active:scale-95 flex items-center justify-center gap-3 disabled:opacity-50"
+                >
+                  {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                  {isSaving ? 'Saving...' : (newJob.id ? 'Update Appointment' : 'Schedule Dispatch')}
+                </button>
+              </div>
             </form>
           </div>
-        </div>
-      )}
-
-      {isAddingContact && (
-        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
-           <div className="bg-white w-full max-w-xl rounded-[3rem] shadow-2xl overflow-hidden flex flex-col border border-white/20 my-auto">
-             <div className="px-10 py-8 bg-slate-900 text-white flex justify-between items-center">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg"><UserPlus size={24} /></div>
-                  <h3 className="text-xl font-black uppercase tracking-tight">Quick CRM Add</h3>
-                </div>
-                <button onClick={() => setIsAddingContact(false)} className="p-3 hover:bg-white/10 rounded-full transition-colors"><X size={28} /></button>
-             </div>
-             <form onSubmit={handleCreateContact} className="p-10 space-y-6 overflow-y-auto scrollbar-hide max-h-[75vh]">
-                <div className="grid grid-cols-2 gap-4">
-                   <div>
-                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">First Name</label>
-                      <input required type="text" value={newContactForm.firstName} onChange={e => setNewContactForm({...newContactForm, firstName: e.target.value})} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm" placeholder="John" />
-                   </div>
-                   <div>
-                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Last Name</label>
-                      <input required type="text" value={newContactForm.lastName} onChange={e => setNewContactForm({...newContactForm, lastName: e.target.value})} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm" placeholder="Smith" />
-                   </div>
-                   <div className="col-span-2">
-                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Phone</label>
-                      <input required type="text" value={newContactForm.phone} onChange={e => setNewContactForm({...newContactForm, phone: formatPhoneNumberInput(e.target.value)})} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm" placeholder="(555) 555-5555" />
-                   </div>
-                   <div className="col-span-2">
-                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Email</label>
-                      <input required type="email" value={newContactForm.email} onChange={e => setNewContactForm({...newContactForm, email: e.target.value})} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black outline-none focus:ring-2 focus:ring-blue-600/10 shadow-sm" placeholder="john@example.com" />
-                   </div>
-                </div>
-                <div className="space-y-4 pt-4 border-t border-slate-100">
-                   <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Service Residence</label>
-                   <input required type="text" placeholder="Street Address" value={newContactForm.street} onChange={e => setNewContactForm({...newContactForm, street: e.target.value})} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black outline-none mb-3 focus:ring-2 focus:ring-blue-600/10" />
-                   <div className="grid grid-cols-2 gap-4">
-                      <input required type="text" placeholder="City" value={newContactForm.city} onChange={e => setNewContactForm({...newContactForm, city: e.target.value})} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black outline-none focus:ring-2 focus:ring-blue-600/10" />
-                      <input required type="text" placeholder="State (e.g. CA)" value={newContactForm.state} onChange={e => setNewContactForm({...newContactForm, state: e.target.value})} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black outline-none focus:ring-2 focus:ring-blue-600/10" />
-                      <input required type="text" placeholder="Postal Code" value={newContactForm.postalCode} onChange={e => setNewContactForm({...newContactForm, postalCode: e.target.value.replace(/\D/g,'')})} className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black outline-none focus:ring-2 focus:ring-blue-600/10" />
-                      <div className="relative">
-                        <Globe size={14} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" />
-                        <input type="text" placeholder="Country" value={newContactForm.country} onChange={e => setNewContactForm({...newContactForm, country: e.target.value})} className="w-full pl-11 px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-black outline-none focus:ring-2 focus:ring-blue-600/10" />
-                      </div>
-                   </div>
-                </div>
-                <div className="pt-4 flex gap-4 sticky bottom-0 bg-white/90 backdrop-blur-sm pb-2">
-                   <button type="button" onClick={() => setIsAddingContact(false)} className="flex-1 py-4 bg-slate-100 text-slate-500 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-slate-200 transition-all">Cancel</button>
-                   <button type="submit" disabled={isSaving} className="flex-[2] py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-xl flex items-center justify-center gap-3 active:scale-95">
-                     {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-                     Finalize CRM Entry
-                   </button>
-                </div>
-             </form>
-           </div>
         </div>
       )}
     </div>
   );
 };
-
-export default UnifiedCalendar;

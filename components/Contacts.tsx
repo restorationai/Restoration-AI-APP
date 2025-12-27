@@ -29,8 +29,8 @@ import {
   Globe
 } from 'lucide-react';
 import { Contact, ContactType, Role } from '../types';
-import { syncContactToSupabase, fetchContactsFromSupabase } from '../lib/supabase';
-import { formatPhoneNumberInput } from '../utils/phoneUtils.ts';
+import { syncContactToSupabase, fetchContactsFromSupabase, supabase } from '../lib/supabase';
+import { formatPhoneNumberInput } from '../utils/phoneUtils';
 
 const US_STATES = [
   "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"
@@ -68,9 +68,9 @@ const Contacts: React.FC = () => {
     const loadContacts = async () => {
       try {
         setIsLoading(true);
-        const { data: { user } } = await (await import('../lib/supabase.ts')).supabase.auth.getUser();
+        const { data: { user } } = await supabase.auth.getUser();
         if (user) {
-          const { data: profile } = await (await import('../lib/supabase.ts')).supabase
+          const { data: profile } = await supabase
             .from('profiles')
             .select('company_id')
             .eq('id', user.id)

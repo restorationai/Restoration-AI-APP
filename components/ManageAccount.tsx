@@ -37,8 +37,8 @@ import {
 } from 'lucide-react';
 import { SERVICE_OPTIONS, TIMEZONES } from '../constants';
 import { Contact, ContactType, DispatchStrategy, NotificationPreference, RestorationCompany, Role } from '../types';
-import { syncCompanySettingsToSupabase, fetchContactsFromSupabase, syncContactToSupabase } from '../lib/supabase.ts';
-import { formatPhoneNumberInput, toDisplay } from '../utils/phoneUtils.ts';
+import { syncCompanySettingsToSupabase, fetchContactsFromSupabase, syncContactToSupabase } from '../lib/supabase';
+import { formatPhoneNumberInput } from '../utils/phoneUtils';
 
 interface ManageAccountProps {
   isOpen: boolean;
@@ -604,7 +604,7 @@ const ManageAccount: React.FC<ManageAccountProps> = ({ isOpen, onClose, companyS
                         </div>
                       </div>
                       <div>
-                        <label className="block text-[10px) font-black text-slate-400 uppercase tracking-[0.2em] mb-2 px-1">Counties / Cities you service</label>
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 px-1">Counties / Cities you service</label>
                         <textarea 
                           rows={4}
                           value={settings.serviceAreas} 

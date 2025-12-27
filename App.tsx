@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, 
@@ -19,17 +20,18 @@ import {
   Loader2,
   RefreshCw
 } from 'lucide-react';
-import DispatchScheduling from './components/DispatchScheduling.tsx';
-import ManageAccount from './components/ManageAccount.tsx';
-import Inbox from './components/Inbox.tsx';
-import Contacts from './components/Contacts.tsx';
-import Placeholder from './components/Placeholder.tsx';
-import UnifiedCalendar from './components/UnifiedCalendar.tsx';
-import JobPipeline from './components/JobPipeline.tsx';
-import Auth from './components/Auth.tsx';
-import { INITIAL_COMPANY_SETTINGS } from './constants.tsx';
-import { fetchCompanySettings, getCurrentUser, signOut, supabase } from './lib/supabase.ts';
-import { RestorationCompany } from './types.ts';
+import DispatchScheduling from './components/DispatchScheduling';
+import ManageAccount from './components/ManageAccount';
+import Inbox from './components/Inbox';
+import Contacts from './components/Contacts';
+import Placeholder from './components/Placeholder';
+// Fix: Use named import for UnifiedCalendar
+import { UnifiedCalendar } from './components/UnifiedCalendar';
+import JobPipeline from './components/JobPipeline';
+import Auth from './components/Auth';
+import { INITIAL_COMPANY_SETTINGS } from './constants';
+import { fetchCompanySettings, getCurrentUser, signOut, supabase } from './lib/supabase';
+import { RestorationCompany } from './types';
 
 type Tab = 'dashboard' | 'conversations' | 'calendars' | 'job-pipeline' | 'dispatch' | 'settings' | 'estimates-ai' | 'contacts';
 

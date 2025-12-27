@@ -35,10 +35,10 @@ import {
   ChevronDown,
   Info
 } from 'lucide-react';
-import { DEFAULT_SCHEDULE } from '../constants.tsx';
-import { Role, Status, InspectionStatus, Technician, DaySchedule, RestorationCompany, Contact, ContactType, DispatchLog } from '../types.ts';
-import { syncTechnicianToSupabase, syncScheduleToSupabase, fetchTechniciansFromSupabase, fetchCompanySettings, syncCompanySettingsToSupabase, fetchContactsFromSupabase, syncContactToSupabase, deleteTechnicianFromSupabase, fetchDispatchLogs } from '../lib/supabase.ts';
-import { formatPhoneNumberInput, toDisplay } from '../utils/phoneUtils.ts';
+import { DEFAULT_SCHEDULE } from '../constants';
+import { Role, Status, InspectionStatus, Technician, DaySchedule, RestorationCompany, Contact, ContactType, DispatchLog } from '../types';
+import { syncTechnicianToSupabase, syncScheduleToSupabase, fetchTechniciansFromSupabase, fetchCompanySettings, syncCompanySettingsToSupabase, fetchContactsFromSupabase, syncContactToSupabase, deleteTechnicianFromSupabase, fetchDispatchLogs, supabase } from '../lib/supabase';
+import { formatPhoneNumberInput } from '../utils/phoneUtils';
 
 interface DispatchSchedulingProps {
   onOpenSettings: () => void;
@@ -113,9 +113,9 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
     const loadData = async () => {
       try {
         setIsLoading(true);
-        const { data: { user } } = await (await import('../lib/supabase.ts')).supabase.auth.getUser();
+        const { data: { user } } = await supabase.auth.getUser();
         if (user) {
-          const { data: profile } = await (await import('../lib/supabase.ts')).supabase
+          const { data: profile } = await supabase
             .from('profiles')
             .select('company_id')
             .eq('id', user.id)
@@ -381,7 +381,6 @@ const DispatchScheduling: React.FC<DispatchSchedulingProps> = ({ onOpenSettings 
       }
       
       // Update local state by merging the re-ranked pack back into the master list
-      const updatedIds = new Set(updates.map(u => u.id));
       const updatedTechs = technicians.map(t => {
         const up = updates.find(u => u.id === t.id);
         if (up) {
