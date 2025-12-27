@@ -130,7 +130,7 @@ const ManageAccount: React.FC<ManageAccountProps> = ({ isOpen, onClose, companyS
   const handleRemoveOwner = async (index: number) => {
     const ownerToRemove = settings.owners[index];
     
-    // Remove the 'Alert Recipient' tag from the master contact record
+    // Find the original contact to remove the 'Alert Recipient' tag
     const masterContact = allContacts.find(c => c.phone === ownerToRemove.phone || c.email === ownerToRemove.email);
     
     if (masterContact) {
@@ -604,7 +604,7 @@ const ManageAccount: React.FC<ManageAccountProps> = ({ isOpen, onClose, companyS
                         </div>
                       </div>
                       <div>
-                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 px-1">Counties / Cities you service</label>
+                        <label className="block text-[10px) font-black text-slate-400 uppercase tracking-[0.2em] mb-2 px-1">Counties / Cities you service</label>
                         <textarea 
                           rows={4}
                           value={settings.serviceAreas} 
@@ -667,12 +667,12 @@ const ManageAccount: React.FC<ManageAccountProps> = ({ isOpen, onClose, companyS
                     </div>
                     <div>
                       <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Email (Reports)</label>
-                      <input required type="email" placeholder="john@restoration.com" value={newRecipientForm.email} onChange={e => setNewRecipientForm({...newRecipientForm, email: e.target.value})} className="w-full px-6 py-4 bg-white border border-slate-100 rounded-2xl text-sm font-bold shadow-sm outline-none focus:ring-8 focus:ring-blue-600/5 transition-all" />
+                      <input required type="email" placeholder="john@restoration.com" value={newRecipientForm.email} onChange={e => setNewRecipientForm({...newRecipientForm, email: e.target.value})} className="w-full px-6 py-4 bg-white border border-slate-100 rounded-2xl text-sm font-bold shadow-sm focus:ring-4 focus:ring-blue-600/5 transition-all outline-none" />
                     </div>
                  </div>
                  <div className="p-6 bg-blue-50 rounded-[2rem] border border-blue-100 flex items-start gap-4">
                     <Crown size={20} className="text-amber-500 shrink-0" />
-                    <p className="text-[10px] font-bold text-blue-700 leading-tight">This recipient will be automatically added as a <span className="font-black">VIP Team Member</span> in your CRM directory.</p>
+                    <p className="text-[10px] font-bold text-blue-700 leading-tight">This recipient will be automatically added as an <span className="font-black">Alert Recipient</span> in your CRM directory.</p>
                  </div>
                  <div className="flex gap-4">
                     <button type="button" onClick={() => setIsCreatingNewRecipient(null)} className="flex-1 py-4 bg-white border border-slate-200 text-slate-400 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-slate-50 transition-all">Cancel</button>
