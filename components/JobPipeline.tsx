@@ -48,7 +48,7 @@ import {
 } from 'lucide-react';
 import { PipelineStage, Job, Contact, JobNote, GHLCustomFields, CalendarEvent, ContactType } from '../types';
 import { calculateGPP } from '../utils/psychro';
-import { fetchJobsFromSupabase, syncJobToSupabase, getCurrentUser, fetchContactsFromSupabase, fetchCalendarEvents } from '../lib/supabase';
+import { fetchJobsFromSupabase, syncJobToSupabase, getCurrentUser, fetchContactsFromSupabase, fetchCalendarEvents, supabase } from '../lib/supabase';
 
 const STAGES: PipelineStage[] = ['Inbound', 'Dispatching', 'In Progress', 'Completion', 'Invoiced'];
 
@@ -126,6 +126,68 @@ const JobPipeline: React.FC = () => {
     };
     loadData();
   }, []);
+
+  // Real-time Pipeline Listener
+  useEffect(() => {
+    if (!companyId) return;
+
+    const channel = supabase
+      .channel(`job-pipeline-realtime-${companyId}`)
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'jobs', 
+        filter: `client_id=eq.${companyId}` 
+      }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const row = payload.new as any;
+          const newJob: Job = {
+            id: row.id,
+            contactId: row.contact_id,
+            propertyManagerId: row.property_manager_id,
+            title: row.title,
+            stage: row.stage as PipelineStage,
+            status: row.status as 'Open' | 'Closed',
+            lossType: row.loss_type || 'Other',
+            assignedTechIds: row.assigned_tech_ids || [],
+            urgency: row.urgency || 'Medium',
+            estimatedValue: Number(row.estimated_value) || 0,
+            timestamp: new Date(row.created_at).toLocaleDateString(),
+            customFields: row.custom_fields || {},
+            notes: row.notes || [],
+            readings: row.readings || [],
+            financials: row.financials || [],
+            documents: row.documents || []
+          };
+          
+          setJobs(prev => {
+            if (prev.some(j => j.id === newJob.id)) return prev;
+            return [newJob, ...prev];
+          });
+        } else if (payload.eventType === 'UPDATE') {
+          const row = payload.new as any;
+          setJobs(prev => prev.map(j => j.id === row.id ? {
+            ...j,
+            stage: row.stage as PipelineStage,
+            status: row.status as 'Open' | 'Closed',
+            title: row.title,
+            urgency: row.urgency,
+            lossType: row.loss_type,
+            assignedTechIds: row.assigned_tech_ids || [],
+            estimatedValue: Number(row.estimated_value) || 0,
+            customFields: row.custom_fields || j.customFields,
+            notes: row.notes || j.notes
+          } : j));
+        } else if (payload.eventType === 'DELETE') {
+          setJobs(prev => prev.filter(j => j.id !== payload.old.id));
+        }
+      })
+      .subscribe();
+
+    return () => {
+      channel.unsubscribe();
+    };
+  }, [companyId]);
 
   const getContact = (id: string) => contacts.find(c => c.id === id);
 
